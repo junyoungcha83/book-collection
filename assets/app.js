@@ -154,10 +154,10 @@ function openBook(id) {
   curId = id;
   const b = bookById(id); if (!b) return;
   renderDetailHeader();
-  document.getElementById('fToc').value = b.toc || '';
-  document.getElementById('fContent').value = b.content || '';
-  document.getElementById('fSummary').value = b.summary || '';
-  document.getElementById('fMemo').value = b.memo || '';
+  setEditorHTML('fToc', b.toc);
+  setEditorHTML('fContent', b.content);
+  setEditorHTML('fSummary', b.summary);
+  setEditorHTML('fMemo', b.memo);
   renderImages();
   setTab('toc');
   document.getElementById('homeView').classList.add('hidden');
@@ -181,13 +181,56 @@ function backHome() {
   renderHome();
 }
 
-// 텍스트 필드 자동 저장(디바운스)
+// 저장된 값 → 편집기 HTML. 옛 평문(태그 없음)은 이스케이프+줄바꿈 변환.
+function setEditorHTML(id, val) {
+  const el = document.getElementById(id);
+  val = val || '';
+  if (/[<][a-zA-Z/]/.test(val)) el.innerHTML = val;               // 이미 서식(HTML)
+  else el.innerHTML = esc(val).replace(/\n/g, '<br>');            // 평문 마이그레이션
+}
+// 편집 내용 자동 저장(디바운스) — contenteditable 은 innerHTML 저장
 function onFieldInput(e) {
   const b = bookById(curId); if (!b) return;
-  b[e.target.dataset.field] = e.target.value;
+  const el = e.currentTarget;
+  b[el.dataset.field] = el.innerHTML;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => { save(); flashSaved(); }, 400);
 }
+function saveActiveField() {
+  const ed = activeEditor(); if (!ed) return;
+  const b = bookById(curId); if (!b) return;
+  b[ed.dataset.field] = ed.innerHTML;
+  save(); flashSaved();
+}
+
+// ── 서식 툴바 ────────────────────────────────
+let fmtScope = 'sel';   // 'sel' 선택영역 / 'all' 전체
+let savedRange = null;  // 편집기 안의 마지막 선택(버튼 탭으로 포커스 잃어도 복원)
+function activeEditor() {
+  for (const id of ['panelToc', 'panelContent', 'panelSummary', 'panelMemo']) {
+    const p = document.getElementById(id);
+    if (p && !p.classList.contains('hidden')) return p.querySelector('.edit');
+  }
+  return null;
+}
+function selectAllIn(ed) {
+  const r = document.createRange(); r.selectNodeContents(ed);
+  const s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+}
+// 선택을 유지한 채 명령 실행. scope='all'이면 전체 선택, 'sel'이면 마지막 선택 복원.
+function withScope(run) {
+  const ed = activeEditor(); if (!ed) return;
+  ed.focus();
+  const s = window.getSelection();
+  if (fmtScope === 'all') selectAllIn(ed);
+  else if (savedRange && ed.contains(savedRange.commonAncestorContainer)) { s.removeAllRanges(); s.addRange(savedRange); }
+  try { document.execCommand('styleWithCSS', false, true); } catch (e) {}
+  run();
+  saveActiveField();
+}
+function fmtAlign(cmd) { withScope(() => document.execCommand(cmd)); }
+function fmtSize(sz) { withScope(() => document.execCommand('fontSize', false, sz)); }
+function fmtColor(c) { withScope(() => document.execCommand('foreColor', false, c)); }
 
 // ── 내용 탭: 그림/그래프 ─────────────────────
 function renderImages() {
@@ -253,6 +296,26 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btnEditInfo').onclick = () => openDialog(curId);
   document.querySelectorAll('#tabs .tab').forEach(t => t.onclick = () => setTab(t.dataset.tab));
   document.querySelectorAll('.edit').forEach(t => t.addEventListener('input', onFieldInput));
+
+  // ── 서식 툴바 배선 ──
+  // 편집기 안 선택을 계속 기억(버튼 탭으로 포커스가 옮겨가도 복원용)
+  document.addEventListener('selectionchange', () => {
+    const s = window.getSelection(); if (!s.rangeCount) return;
+    const ed = activeEditor();
+    if (ed && ed.contains(s.anchorNode) && ed.contains(s.focusNode)) savedRange = s.getRangeAt(0).cloneRange();
+  });
+  document.querySelectorAll('#fmtScope button').forEach(btn => btn.onclick = () => {
+    fmtScope = btn.dataset.scope;
+    document.querySelectorAll('#fmtScope button').forEach(b => b.classList.toggle('on', b === btn));
+  });
+  // 버튼은 pointerdown+preventDefault 로 편집기 선택을 뺏지 않음
+  const bindFmt = (sel, fn) => document.querySelectorAll(sel).forEach(btn =>
+    btn.addEventListener('pointerdown', e => { e.preventDefault(); fn(btn); }));
+  bindFmt('#fmtBar [data-cmd]', btn => fmtAlign(btn.dataset.cmd));
+  bindFmt('#fmtBar [data-size]', btn => fmtSize(btn.dataset.size));
+  bindFmt('#fmtColors [data-color]', btn => fmtColor(btn.dataset.color));
+  const cp = document.getElementById('fmtColorPick');
+  cp.addEventListener('input', () => fmtColor(cp.value));
   document.getElementById('dialogSave').onclick = saveDialog;
   document.getElementById('dialogCancel').onclick = () => document.getElementById('bookDialog').close();
   document.getElementById('fBookTitle').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); saveDialog(); } });

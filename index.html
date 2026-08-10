@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>도서모음</title>
-<link rel="stylesheet" href="assets/app.css?v=3" />
+<link rel="stylesheet" href="assets/app.css?v=4" />
 
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#14b8a6" />
@@ -50,11 +50,11 @@
   <main class="detail-main">
     <!-- 목차 -->
     <div class="panel" id="panelToc">
-      <textarea class="edit" id="fToc" data-field="toc" placeholder="목차를 입력하세요…&#10;예) 1장 …&#10;2장 …"></textarea>
+      <div class="edit" id="fToc" data-field="toc" contenteditable="true" data-ph="목차를 입력하세요… (예: 1장 …)"></div>
     </div>
     <!-- 내용 (텍스트 + 그림/그래프) -->
     <div class="panel hidden" id="panelContent">
-      <textarea class="edit" id="fContent" data-field="content" placeholder="내용을 입력하세요… (아래에서 그림·그래프도 추가할 수 있어요)"></textarea>
+      <div class="edit" id="fContent" data-field="content" contenteditable="true" data-ph="내용을 입력하세요… (아래에서 그림·그래프도 추가할 수 있어요)"></div>
       <div class="img-bar">
         <button class="btn small" id="btnAddImg">🖼️ 그림/그래프 추가</button>
         <input type="file" accept="image/*" id="imgFile" multiple style="display:none" />
@@ -63,13 +63,44 @@
     </div>
     <!-- 내용요약 -->
     <div class="panel hidden" id="panelSummary">
-      <textarea class="edit" id="fSummary" data-field="summary" placeholder="핵심 내용을 요약해 보세요…"></textarea>
+      <div class="edit" id="fSummary" data-field="summary" contenteditable="true" data-ph="핵심 내용을 요약해 보세요…"></div>
     </div>
     <!-- 메모 -->
     <div class="panel hidden" id="panelMemo">
-      <textarea class="edit" id="fMemo" data-field="memo" placeholder="자유 메모…"></textarea>
+      <div class="edit" id="fMemo" data-field="memo" contenteditable="true" data-ph="자유 메모…"></div>
     </div>
   </main>
+
+  <!-- 서식 툴바 (각 탭 하부 공통) -->
+  <div class="fmt-bar" id="fmtBar">
+    <div class="fmt-scope" id="fmtScope">
+      <span class="fmt-label">적용:</span>
+      <button data-scope="sel" class="on">선택</button>
+      <button data-scope="all">전체</button>
+    </div>
+    <div class="fmt-row">
+      <div class="fmt-group" title="정렬">
+        <button data-cmd="justifyLeft" aria-label="왼쪽 정렬">좌</button>
+        <button data-cmd="justifyCenter" aria-label="가운데 정렬">중</button>
+        <button data-cmd="justifyRight" aria-label="오른쪽 정렬">우</button>
+      </div>
+      <div class="fmt-group" title="글자 크기">
+        <button data-size="2">작게</button>
+        <button data-size="4">보통</button>
+        <button data-size="6">크게</button>
+        <button data-size="7">특대</button>
+      </div>
+      <div class="fmt-group colors" id="fmtColors" title="글자 색">
+        <button class="sw" data-color="#0f172a" style="background:#0f172a"></button>
+        <button class="sw" data-color="#ef4444" style="background:#ef4444"></button>
+        <button class="sw" data-color="#f97316" style="background:#f97316"></button>
+        <button class="sw" data-color="#16a34a" style="background:#16a34a"></button>
+        <button class="sw" data-color="#2563eb" style="background:#2563eb"></button>
+        <button class="sw" data-color="#7c3aed" style="background:#7c3aed"></button>
+        <label class="sw custom" title="직접 선택"><input type="color" id="fmtColorPick" value="#14b8a6" /></label>
+      </div>
+    </div>
+  </div>
   <div class="save-hint" id="saveHint">자동 저장됨 ✓</div>
 </section>
 
@@ -93,7 +124,7 @@
 <!-- 이미지 확대 -->
 <div class="lightbox hidden" id="lightbox"><img id="lightboxImg" alt="" /></div>
 
-<script src="assets/app.js?v=3"></script>
+<script src="assets/app.js?v=4"></script>
 <script>
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

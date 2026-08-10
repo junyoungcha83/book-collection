@@ -1,6 +1,6 @@
 // 도서모음 — 앱 셸 오프라인 캐시. CACHE 이름 바꾸면 옛 캐시 자동 폐기.
-const CACHE = 'book-collection-v3';
-const ASSETS = ['./', './index.html', './assets/app.css?v=3', './assets/app.js?v=3', './manifest.webmanifest', './assets/icon.svg'];
+const CACHE = 'book-collection-v4';
+const ASSETS = ['./', './index.html', './assets/app.css?v=4', './assets/app.js?v=4', './manifest.webmanifest', './assets/icon.svg'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).catch(() => {})); self.skipWaiting(); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))); self.clients.claim(); });
 self.addEventListener('fetch', e => {
