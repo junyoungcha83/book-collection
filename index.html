@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>도서모음</title>
-<link rel="stylesheet" href="assets/app.css?v=1" />
+<link rel="stylesheet" href="assets/app.css?v=3" />
 
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#14b8a6" />
@@ -22,6 +22,8 @@
     <img class="app-logo" src="assets/icon.svg" alt="" />
     <h1>도서모음</h1>
     <span class="app-count" id="bookCount"></span>
+    <span class="sync-status" id="syncStatus"></span>
+    <button class="icon-btn" id="btnLock" title="동기화 잠금/해제" aria-label="편집 잠금">🔒</button>
   </header>
   <main class="home-main">
     <div class="grid" id="grid"></div>
@@ -91,7 +93,7 @@
 <!-- 이미지 확대 -->
 <div class="lightbox hidden" id="lightbox"><img id="lightboxImg" alt="" /></div>
 
-<script src="assets/app.js?v=1"></script>
+<script src="assets/app.js?v=3"></script>
 <script>
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

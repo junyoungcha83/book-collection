@@ -1,0 +1,12 @@
+name = "book-collection-api"
+main = "src/index.js"
+compatibility_date = "2025-05-01"
+
+# KV — 다음 명령으로 생성 후 id 채우기:
+#   npx wrangler kv namespace create BOOKS
+[[kv_namespaces]]
+binding = "BOOKS"
+id = "5c7ba00e0fc845938c9213232ddcece8"
+
+# 편집 비밀번호는 secret:
+#   npx wrangler secret put EDIT_TOKEN

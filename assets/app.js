@@ -1,20 +1,103 @@
 // 도서모음 — 기기(localStorage) 저장 정적 앱. 책 그리드 + 4탭(목차/내용/내용요약/메모).
 'use strict';
 const STORE = 'doso-books-v1';
+const TOKEN_KEY = 'doso-edit-token';
+const API_BASE = 'https://book-collection-api.junyoung-cha83.workers.dev';
+const SYNC_DEBOUNCE_MS = 800;
 const IMG_MAX = 1200;   // 업로드 이미지 다운스케일 최대 변
 
 let state = { books: [] };
 let curId = null;        // 열려 있는 책 id
 let editId = null;       // 다이얼로그 수정 대상(없으면 추가)
-let saveTimer = null;
+let saveTimer = null;    // 텍스트 입력 → localStorage 디바운스
+let _syncTimer = null, _syncCtrl = null;
 
-// ── 저장/로드 ────────────────────────────────
+// ── 저장/로드 + 서버 동기화 ──────────────────
 function load() {
-  try { const raw = localStorage.getItem(STORE); if (raw) { const d = JSON.parse(raw); if (d && Array.isArray(d.books)) state = d; } } catch (e) {}
+  try { const raw = localStorage.getItem(STORE); if (raw) { const d = JSON.parse(raw); if (d && Array.isArray(d.books)) state = migrate(d); } } catch (e) {}
 }
-function save() {
-  try { localStorage.setItem(STORE, JSON.stringify(state)); return true; }
-  catch (e) { return false; }
+function cacheLocal() { try { localStorage.setItem(STORE, JSON.stringify(state)); return true; } catch (e) { return false; } }
+// 저장: 로컬 캐시 + (토큰 있으면) 서버 동기화 예약. 로컬 저장 성공 여부 반환.
+function save() { const ok = cacheLocal(); scheduleSync(); return ok; }
+
+function getEditToken() { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; } }
+function setSyncStatus(s) {
+  const el = document.getElementById('syncStatus'); if (!el) return;
+  const map = { saving: '동기화중…', saved: '동기화됨 ✓', error: '오프라인', readonly: '로컬 전용', '': '' };
+  el.textContent = map[s] ?? ''; el.className = 'sync-status ' + (s || '');
+}
+function updateLockUI() {
+  const b = document.getElementById('btnLock'); if (!b) return;
+  const has = !!getEditToken();
+  b.textContent = has ? '🔓' : '🔒';
+  b.title = has ? '동기화 켜짐 (탭하여 변경/해제)' : '동기화 잠금 — 탭하여 비밀번호 입력';
+}
+function migrate(d) {
+  const books = (d && Array.isArray(d.books) ? d.books : []).map(b => ({
+    id: b.id || genId(),
+    title: String(b.title || ''), author: String(b.author || ''),
+    created_at: b.created_at || new Date().toISOString(),
+    toc: String(b.toc || ''), content: String(b.content || ''),
+    summary: String(b.summary || ''), memo: String(b.memo || ''),
+    images: Array.isArray(b.images) ? b.images.filter(x => typeof x === 'string') : [],
+  }));
+  return { version: 1, books };
+}
+async function fetchFromServer() {
+  try {
+    const res = await fetch(`${API_BASE}/api/data`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const j = await res.json();
+    if (j && Array.isArray(j.books)) return j;
+  } catch (e) {}
+  return null;
+}
+function scheduleSync() {
+  if (!getEditToken()) { setSyncStatus('readonly'); return; }
+  if (_syncTimer) clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(pushToServer, SYNC_DEBOUNCE_MS);
+}
+async function pushToServer() {
+  const token = getEditToken(); if (!token) return;
+  if (_syncCtrl) _syncCtrl.abort();
+  _syncCtrl = new AbortController();
+  setSyncStatus('saving');
+  try {
+    const res = await fetch(`${API_BASE}/api/data`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Edit-Token': token },
+      body: JSON.stringify(state), signal: _syncCtrl.signal,
+    });
+    if (res.ok) setSyncStatus('saved');
+    else if (res.status === 401) { try { localStorage.removeItem(TOKEN_KEY); } catch (e) {} updateLockUI(); setSyncStatus('error'); alert('편집 비밀번호가 잘못됐습니다 — 다시 입력하세요.'); }
+    else if (res.status === 413) { setSyncStatus('error'); alert('데이터가 너무 커서 동기화할 수 없어요(그림 용량). 그림 수를 줄여 주세요.'); }
+    else setSyncStatus('error');
+  } catch (e) { if (e.name !== 'AbortError') setSyncStatus('error'); }
+}
+function promptEditToken() {
+  const cur = getEditToken();
+  const v = prompt(cur ? '동기화 비밀번호 (지우고 확인 시 잠금)' : '동기화 비밀번호를 입력하세요', cur);
+  if (v === null) return;
+  try { if (v.trim()) localStorage.setItem(TOKEN_KEY, v.trim()); else localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+  updateLockUI();
+  if (getEditToken()) pushToServer(); else setSyncStatus('readonly');
+}
+// 시작 시 서버에서 불러오기(있으면 채택, 서버가 비었고 로컬이 있으면 업로드)
+async function syncInitial() {
+  setSyncStatus(getEditToken() ? 'saved' : 'readonly');
+  const remote = await fetchFromServer();
+  if (remote && remote.books.length > 0) {
+    state = migrate(remote); cacheLocal();
+    if (curId && !bookById(curId)) backHome();
+    else if (curId) openBook(curId);
+    else renderHome();
+    setSyncStatus(getEditToken() ? 'saved' : 'readonly');
+  } else if (remote) {                 // 서버 비어 있음
+    if (getEditToken() && state.books.length) pushToServer();
+    else setSyncStatus(getEditToken() ? 'saved' : 'readonly');
+  } else {                             // 오프라인/오류 → 로컬 유지
+    setSyncStatus('error');
+  }
 }
 function flashSaved() {
   const h = document.getElementById('saveHint');
@@ -158,6 +241,9 @@ function openLightbox(src) {
 document.addEventListener('DOMContentLoaded', () => {
   load();
   renderHome();
+  updateLockUI();
+  document.getElementById('btnLock').onclick = promptEditToken;
+  syncInitial();   // 서버에서 최신 목록 받아오기(비동기)
   document.getElementById('btnBack').onclick = backHome;
   document.getElementById('btnDelete').onclick = () => {
     const b = bookById(curId); if (!b) return;

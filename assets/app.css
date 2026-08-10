@@ -18,6 +18,9 @@ body{ background:var(--bg); color:var(--text);
 .app-logo{ width:34px; height:34px; border-radius:8px; flex:0 0 auto; }
 .app-header h1{ font-size:1.2rem; margin:0; font-weight:900; letter-spacing:.5px; }
 .app-count{ margin-left:auto; font-size:.85rem; font-weight:700; opacity:.8; }
+.sync-status{ font-size:.72rem; font-weight:700; opacity:.9; white-space:nowrap; }
+.sync-status.saving{ color:#083344; } .sync-status.saved{ color:#065f46; }
+.sync-status.error{ color:#7f1d1d; } .sync-status.readonly{ color:#334155; }
 .icon-btn{ width:38px; height:38px; border:none; background:rgba(255,255,255,.35); color:#083344;
   border-radius:10px; font-size:1.15rem; cursor:pointer; flex:0 0 auto; }
 .icon-btn:active{ background:rgba(255,255,255,.6); }

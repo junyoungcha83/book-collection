@@ -18,6 +18,20 @@ manifest.webmanifest
 sw.js             오프라인 캐시
 ```
 
+## 동기화 (여러 기기)
+- 백엔드: **Cloudflare Worker + KV** (`api/`), 단일 키 `doso-data`에 전체 JSON 저장.
+- 엔드포인트: `GET /api/data`(읽기, 누구나) · `PUT /api/data`(쓰기, `X-Edit-Token` 필요).
+- 앱 우상단 **🔒/🔓** 로 동기화 비밀번호 입력 → 편집 내용이 서버에 저장되고 다른 기기에서도 보임.
+- 비밀번호 없이도 읽기(로컬 전용)는 동작.
+
+### 서버 준비(최초 1회)
+```
+cd api
+npx wrangler kv namespace create BOOKS   # id 를 wrangler.toml 에 반영
+npx wrangler deploy
+npx wrangler secret put EDIT_TOKEN        # 동기화 비밀번호 설정(대화형)
+```
+
 ## 참고
-- 저장은 브라우저 localStorage(약 5MB). 그림을 많이 넣으면 한도에 닿을 수 있어요(업로드 시 자동 축소).
-- 여러 기기 동기화가 필요하면 서버(Cloudflare Worker+KV) 연동을 추가할 수 있습니다.
+- 저장은 서버(KV) + 기기 localStorage 캐시. 그림을 많이 넣으면 용량이 커질 수 있어요(업로드 시 자동 축소).
+- 동시 편집은 마지막 저장이 우선(last-write-wins)입니다.
