@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>도서모음</title>
+<link rel="stylesheet" href="assets/app.css?v=1" />
+
+<link rel="manifest" href="manifest.webmanifest" />
+<meta name="theme-color" content="#14b8a6" />
+<link rel="icon" type="image/svg+xml" href="assets/icon.svg" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="도서모음" />
+<link rel="apple-touch-icon" href="assets/icon.svg" />
+</head>
+<body>
+
+<!-- 홈: 책 그리드 -->
+<section id="homeView">
+  <header class="app-header">
+    <img class="app-logo" src="assets/icon.svg" alt="" />
+    <h1>도서모음</h1>
+    <span class="app-count" id="bookCount"></span>
+  </header>
+  <main class="home-main">
+    <div class="grid" id="grid"></div>
+  </main>
+</section>
+
+<!-- 상세: 4개 탭 -->
+<section id="bookView" class="hidden">
+  <header class="app-header detail">
+    <button class="icon-btn" id="btnBack" aria-label="뒤로">←</button>
+    <div class="detail-title">
+      <h1 id="dTitle">제목</h1>
+      <span id="dAuthor">저자</span>
+    </div>
+    <button class="icon-btn" id="btnEditInfo" title="정보 수정" aria-label="정보 수정">✏️</button>
+    <button class="icon-btn" id="btnDelete" title="삭제" aria-label="삭제">🗑</button>
+  </header>
+  <nav class="tabs" id="tabs" role="tablist">
+    <button class="tab active" data-tab="toc" role="tab">목차</button>
+    <button class="tab" data-tab="content" role="tab">내용</button>
+    <button class="tab" data-tab="summary" role="tab">내용요약</button>
+    <button class="tab" data-tab="memo" role="tab">메모</button>
+  </nav>
+  <main class="detail-main">
+    <!-- 목차 -->
+    <div class="panel" id="panelToc">
+      <textarea class="edit" id="fToc" data-field="toc" placeholder="목차를 입력하세요…&#10;예) 1장 …&#10;2장 …"></textarea>
+    </div>
+    <!-- 내용 (텍스트 + 그림/그래프) -->
+    <div class="panel hidden" id="panelContent">
+      <textarea class="edit" id="fContent" data-field="content" placeholder="내용을 입력하세요… (아래에서 그림·그래프도 추가할 수 있어요)"></textarea>
+      <div class="img-bar">
+        <button class="btn small" id="btnAddImg">🖼️ 그림/그래프 추가</button>
+        <input type="file" accept="image/*" id="imgFile" multiple style="display:none" />
+      </div>
+      <div class="img-grid" id="imgGrid"></div>
+    </div>
+    <!-- 내용요약 -->
+    <div class="panel hidden" id="panelSummary">
+      <textarea class="edit" id="fSummary" data-field="summary" placeholder="핵심 내용을 요약해 보세요…"></textarea>
+    </div>
+    <!-- 메모 -->
+    <div class="panel hidden" id="panelMemo">
+      <textarea class="edit" id="fMemo" data-field="memo" placeholder="자유 메모…"></textarea>
+    </div>
+  </main>
+  <div class="save-hint" id="saveHint">자동 저장됨 ✓</div>
+</section>
+
+<!-- 책 추가/수정 모달 -->
+<dialog id="bookDialog" class="dialog">
+  <form method="dialog">
+    <h2 id="dialogTitle">책 추가</h2>
+    <label class="field"><span>제목</span>
+      <input type="text" id="fBookTitle" autocomplete="off" placeholder="책 제목" required />
+    </label>
+    <label class="field"><span>저자</span>
+      <input type="text" id="fBookAuthor" autocomplete="off" placeholder="지은이" />
+    </label>
+    <div class="dialog-actions">
+      <button type="button" class="btn ghost" id="dialogCancel">취소</button>
+      <button type="button" class="btn" id="dialogSave">저장</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- 이미지 확대 -->
+<div class="lightbox hidden" id="lightbox"><img id="lightboxImg" alt="" /></div>
+
+<script src="assets/app.js?v=1"></script>
+<script>
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
+</script>
+</body>
+</html>
