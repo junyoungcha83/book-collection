@@ -280,6 +280,116 @@ function openLightbox(src) {
   document.getElementById('lightbox').classList.remove('hidden');
 }
 
+// ── 워드(.docx) 불러오기 ─────────────────────
+// docx = ZIP. 브라우저 내장 DecompressionStream 으로 압축해제 → word/document.xml 파싱.
+async function inflateRaw(bytes) {
+  const ds = new DecompressionStream('deflate-raw');
+  const stream = new Response(new Blob([bytes])).body.pipeThrough(ds);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+// ZIP 항목 목록 {name -> {method, size, offset}}
+function readZipEntries(u8) {
+  const dv = new DataView(u8.buffer);
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65558); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('zip_eocd');
+  const count = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const dec = new TextDecoder('utf-8');
+  const entries = {};
+  for (let n = 0; n < count; n++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const method = dv.getUint16(p + 10, true);
+    const compSize = dv.getUint32(p + 20, true);
+    const fnLen = dv.getUint16(p + 28, true);
+    const exLen = dv.getUint16(p + 30, true);
+    const cmLen = dv.getUint16(p + 32, true);
+    const localOff = dv.getUint32(p + 42, true);
+    const name = dec.decode(u8.subarray(p + 46, p + 46 + fnLen));
+    entries[name] = { method, compSize, localOff };
+    p += 46 + fnLen + exLen + cmLen;
+  }
+  return { entries, dv, u8 };
+}
+async function zipRead(zip, name) {
+  const e = zip.entries[name]; if (!e) return null;
+  const { dv, u8 } = zip;
+  const lfnLen = dv.getUint16(e.localOff + 26, true);
+  const lexLen = dv.getUint16(e.localOff + 28, true);
+  const start = e.localOff + 30 + lfnLen + lexLen;
+  const comp = u8.subarray(start, start + e.compSize);
+  return e.method === 0 ? comp : await inflateRaw(comp);
+}
+// document.xml → 서식 HTML(문단 정렬 + 굵게/기울임/밑줄)
+function docxXmlToHtml(xmlText) {
+  const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+  const paras = doc.getElementsByTagName('w:p');
+  const jcMap = { center: 'center', right: 'right', both: 'justify', left: 'left', start: 'left', end: 'right' };
+  let out = '';
+  for (const p of paras) {
+    const jc = p.getElementsByTagName('w:jc')[0];
+    const align = jc ? jcMap[jc.getAttribute('w:val')] : '';
+    let inner = '';
+    for (const r of p.getElementsByTagName('w:r')) {
+      const rpr = r.getElementsByTagName('w:rPr')[0];
+      const b = rpr && rpr.getElementsByTagName('w:b').length;
+      const i = rpr && rpr.getElementsByTagName('w:i').length;
+      const u = rpr && rpr.getElementsByTagName('w:u').length;
+      let t = '';
+      for (const c of r.childNodes) {
+        const nm = c.nodeName;
+        if (nm === 'w:t') t += c.textContent;
+        else if (nm === 'w:tab') t += '    ';
+        else if (nm === 'w:br' || nm === 'w:cr') t += '\n';
+      }
+      if (!t) continue;
+      let h = esc(t).replace(/\n/g, '<br>');
+      if (b) h = `<b>${h}</b>`;
+      if (i) h = `<i>${h}</i>`;
+      if (u) h = `<u>${h}</u>`;
+      inner += h;
+    }
+    out += `<div${align ? ` style="text-align:${align}"` : ''}>${inner || '<br>'}</div>`;
+  }
+  return out;
+}
+async function importDocx(file) {
+  if (typeof DecompressionStream === 'undefined') { alert('이 브라우저는 워드 불러오기를 지원하지 않아요(최신 크롬/사파리 필요).'); return; }
+  const b = bookById(curId); if (!b) return;
+  const btn = document.getElementById('btnImportDocx'); const old = btn.textContent;
+  btn.textContent = '불러오는 중…'; btn.disabled = true;
+  try {
+    const u8 = new Uint8Array(await file.arrayBuffer());
+    const zip = readZipEntries(u8);
+    const docBytes = await zipRead(zip, 'word/document.xml');
+    if (!docBytes) throw new Error('no_document_xml');
+    const html = docxXmlToHtml(new TextDecoder('utf-8').decode(docBytes));
+    // 편집기에 추가(기존 내용 뒤에)
+    const ed = document.getElementById('fContent');
+    ed.innerHTML = (ed.innerHTML && ed.innerHTML !== '<br>') ? ed.innerHTML + '<hr>' + html : html;
+    b.content = ed.innerHTML;
+    // 문서 내 이미지 → 그림 목록에 추가(다운스케일)
+    b.images = b.images || [];
+    const media = Object.keys(zip.entries).filter(n => /^word\/media\/.*\.(png|jpe?g|gif|webp|bmp)$/i.test(n));
+    let imgCount = 0;
+    for (const name of media) {
+      const bytes = await zipRead(zip, name); if (!bytes) continue;
+      const ext = name.split('.').pop().toLowerCase();
+      const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+      const durl = await new Promise(res => downscale(new File([bytes], name, { type: mime }), res));
+      if (durl) { b.images.push(durl); imgCount++; }
+    }
+    save(); renderImages(); flashSaved();
+    alert(`불러왔어요 📄  (문단 ${zip ? html.split('<div').length - 1 : 0}개${imgCount ? `, 그림 ${imgCount}장` : ''})`);
+  } catch (e) {
+    alert('워드 파일을 읽지 못했어요. .docx 형식인지 확인해 주세요.');
+  } finally {
+    btn.textContent = old; btn.disabled = false;
+  }
+}
+
 // ── 초기화 ───────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   load();
@@ -321,5 +431,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('fBookTitle').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); saveDialog(); } });
   document.getElementById('btnAddImg').onclick = () => document.getElementById('imgFile').click();
   document.getElementById('imgFile').onchange = e => addImageFiles(e.target);
+  document.getElementById('btnImportDocx').onclick = () => document.getElementById('docxFile').click();
+  document.getElementById('docxFile').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) importDocx(f); };
   document.getElementById('lightbox').onclick = () => document.getElementById('lightbox').classList.add('hidden');
 });

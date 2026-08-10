@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>도서모음</title>
-<link rel="stylesheet" href="assets/app.css?v=4" />
+<link rel="stylesheet" href="assets/app.css?v=5" />
 
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#14b8a6" />
@@ -56,7 +56,9 @@
     <div class="panel hidden" id="panelContent">
       <div class="edit" id="fContent" data-field="content" contenteditable="true" data-ph="내용을 입력하세요… (아래에서 그림·그래프도 추가할 수 있어요)"></div>
       <div class="img-bar">
+        <button class="btn small" id="btnImportDocx">📄 워드(.docx) 불러오기</button>
         <button class="btn small" id="btnAddImg">🖼️ 그림/그래프 추가</button>
+        <input type="file" accept=".docx" id="docxFile" style="display:none" />
         <input type="file" accept="image/*" id="imgFile" multiple style="display:none" />
       </div>
       <div class="img-grid" id="imgGrid"></div>
@@ -124,7 +126,7 @@
 <!-- 이미지 확대 -->
 <div class="lightbox hidden" id="lightbox"><img id="lightboxImg" alt="" /></div>
 
-<script src="assets/app.js?v=4"></script>
+<script src="assets/app.js?v=5"></script>
 <script>
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
