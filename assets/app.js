@@ -1,6 +1,7 @@
 // 도서모음 — 기기(localStorage) 저장 정적 앱. 책 그리드 + 4탭(목차/내용/내용요약/메모).
 'use strict';
 const STORE = 'doso-books-v1';
+const LAST_KEY = 'doso-last';   // 마지막 읽던 위치(책/탭/스크롤/커서)
 const TOKEN_KEY = 'doso-edit-token';
 const API_BASE = 'https://book-collection-api.junyoung-cha83.workers.dev';
 const SYNC_DEBOUNCE_MS = 800;
@@ -8,9 +9,11 @@ const IMG_MAX = 1200;   // 업로드 이미지 다운스케일 최대 변
 
 let state = { books: [] };
 let curId = null;        // 열려 있는 책 id
+let curTab = 'toc';      // 현재 탭
 let editId = null;       // 다이얼로그 수정 대상(없으면 추가)
 let saveTimer = null;    // 텍스트 입력 → localStorage 디바운스
 let _syncTimer = null, _syncCtrl = null;
+let _lastTimer = null;
 
 // ── 저장/로드 + 서버 동기화 ──────────────────
 function load() {
@@ -89,7 +92,7 @@ async function syncInitial() {
   if (remote && remote.books.length > 0) {
     state = migrate(remote); cacheLocal();
     if (curId && !bookById(curId)) backHome();
-    else if (curId) openBook(curId);
+    else if (curId) restoreLast();
     else renderHome();
     setSyncStatus(getEditToken() ? 'saved' : 'readonly');
   } else if (remote) {                 // 서버 비어 있음
@@ -170,31 +173,90 @@ function renderDetailHeader() {
   document.getElementById('dAuthor').textContent = b.author || '';
 }
 function setTab(tab) {
+  curTab = tab;
   document.querySelectorAll('#tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   const map = { toc: 'panelToc', content: 'panelContent', summary: 'panelSummary', memo: 'panelMemo' };
   Object.entries(map).forEach(([k, id]) => document.getElementById(id).classList.toggle('hidden', k !== tab));
+  saveLast();
 }
 function backHome() {
   curId = null;
   document.getElementById('bookView').classList.add('hidden');
   document.getElementById('homeView').classList.remove('hidden');
   renderHome();
+  try { localStorage.removeItem(LAST_KEY); } catch (e) {}
 }
 
+// 첫 줄 들여쓰기 자동 — 각 블록/첫 줄에 적용, 공백으로 시작(이미 들여쓰기)한 줄은 skip.
+function normalizeIndent(ed) {
+  if (!ed) return;
+  const lead = ed.firstChild;
+  const leadText = lead && lead.nodeType === 3 ? lead.textContent : '';
+  ed.style.textIndent = (lead && lead.nodeType === 3 && leadText && !/^[\s　]/.test(leadText)) ? '1.6em' : '';
+  for (const ch of ed.children) {
+    if (ch.tagName === 'DIV' || ch.tagName === 'P') {
+      const t = ch.textContent || '';
+      if (t && !/^[\s　]/.test(t) && ch.innerHTML !== '<br>') ch.classList.add('ind');
+      else ch.classList.remove('ind');
+    }
+  }
+}
 // 저장된 값 → 편집기 HTML. 옛 평문(태그 없음)은 이스케이프+줄바꿈 변환.
 function setEditorHTML(id, val) {
   const el = document.getElementById(id);
   val = val || '';
   if (/[<][a-zA-Z/]/.test(val)) el.innerHTML = val;               // 이미 서식(HTML)
   else el.innerHTML = esc(val).replace(/\n/g, '<br>');            // 평문 마이그레이션
+  normalizeIndent(el);
 }
 // 편집 내용 자동 저장(디바운스) — contenteditable 은 innerHTML 저장
 function onFieldInput(e) {
   const b = bookById(curId); if (!b) return;
   const el = e.currentTarget;
+  normalizeIndent(el);
   b[el.dataset.field] = el.innerHTML;
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => { save(); flashSaved(); }, 400);
+  saveLast();
+}
+
+// ── 마지막 읽던 위치(책/탭/스크롤/커서) ──────
+function caretOffset(ed) {
+  const s = window.getSelection(); if (!s.rangeCount) return -1;
+  const r = s.getRangeAt(0); if (!ed.contains(r.startContainer)) return -1;
+  const pre = r.cloneRange(); pre.selectNodeContents(ed); pre.setEnd(r.startContainer, r.startOffset);
+  return pre.toString().length;
+}
+function setCaretOffset(ed, off) {
+  if (off < 0) return;
+  let n = off; const walk = document.createTreeWalker(ed, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walk.nextNode())) {
+    if (n <= node.textContent.length) { const r = document.createRange(); r.setStart(node, n); r.collapse(true); const s = window.getSelection(); s.removeAllRanges(); s.addRange(r); return; }
+    n -= node.textContent.length;
+  }
+}
+function saveLast() {
+  if (!curId) return;
+  clearTimeout(_lastTimer);
+  _lastTimer = setTimeout(() => {
+    const ed = activeEditor();
+    const data = { bookId: curId, tab: curTab, scrollY: window.scrollY || 0, caret: ed ? { field: ed.dataset.field, off: caretOffset(ed) } : null };
+    try { localStorage.setItem(LAST_KEY, JSON.stringify(data)); } catch (e) {}
+  }, 250);
+}
+function restoreLast() {
+  let last; try { last = JSON.parse(localStorage.getItem(LAST_KEY) || 'null'); } catch (e) { last = null; }
+  if (!last || !last.bookId || !bookById(last.bookId)) return;
+  openBook(last.bookId);
+  if (last.tab) setTab(last.tab);
+  requestAnimationFrame(() => {
+    window.scrollTo(0, last.scrollY || 0);
+    if (last.caret && last.caret.off >= 0) {
+      const ed = activeEditor();
+      if (ed && ed.dataset.field === last.caret.field) { ed.focus(); setCaretOffset(ed, last.caret.off); }
+    }
+  });
 }
 function saveActiveField() {
   const ed = activeEditor(); if (!ed) return;
@@ -408,12 +470,24 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.edit').forEach(t => t.addEventListener('input', onFieldInput));
 
   // ── 서식 툴바 배선 ──
-  // 편집기 안 선택을 계속 기억(버튼 탭으로 포커스가 옮겨가도 복원용)
+  // 편집기 안의 '실제 선택(비어있지 않은)'만 기억 → 키보드 닫기/블러로 커서가 접혀도 유지
   document.addEventListener('selectionchange', () => {
-    const s = window.getSelection(); if (!s.rangeCount) return;
+    const s = window.getSelection(); if (!s.rangeCount || s.isCollapsed) return;
     const ed = activeEditor();
     if (ed && ed.contains(s.anchorNode) && ed.contains(s.focusNode)) savedRange = s.getRangeAt(0).cloneRange();
   });
+  // 모바일 키보드가 올라오면 툴바를 키보드 바로 위로 띄워 가려지지 않게
+  const vv = window.visualViewport;
+  if (vv) {
+    const posBar = () => {
+      const bar = document.getElementById('fmtBar');
+      if (!bar || document.getElementById('bookView').classList.contains('hidden')) return;
+      const kb = window.innerHeight - (vv.height + vv.offsetTop);
+      if (kb > 80) { bar.style.position = 'fixed'; bar.style.left = '0'; bar.style.right = '0'; bar.style.bottom = kb + 'px'; bar.style.zIndex = '60'; }
+      else { bar.style.position = ''; bar.style.left = ''; bar.style.right = ''; bar.style.bottom = ''; bar.style.zIndex = ''; }
+    };
+    vv.addEventListener('resize', posBar); vv.addEventListener('scroll', posBar);
+  }
   document.querySelectorAll('#fmtScope button').forEach(btn => btn.onclick = () => {
     fmtScope = btn.dataset.scope;
     document.querySelectorAll('#fmtScope button').forEach(b => b.classList.toggle('on', b === btn));
@@ -434,4 +508,10 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btnImportDocx').onclick = () => document.getElementById('docxFile').click();
   document.getElementById('docxFile').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) importDocx(f); };
   document.getElementById('lightbox').onclick = () => document.getElementById('lightbox').classList.add('hidden');
+
+  // 마지막 읽던 위치 복원 + 위치 저장(스크롤/이탈 시)
+  restoreLast();
+  window.addEventListener('scroll', saveLast, { passive: true });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveLast(); });
+  window.addEventListener('pagehide', saveLast);
 });

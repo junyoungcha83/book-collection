@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>도서모음</title>
-<link rel="stylesheet" href="assets/app.css?v=5" />
+<link rel="stylesheet" href="assets/app.css?v=6" />
 
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#14b8a6" />
@@ -81,6 +81,9 @@
       <button data-scope="all">전체</button>
     </div>
     <div class="fmt-row">
+      <div class="fmt-group" title="글자">
+        <button data-cmd="bold" aria-label="진하게"><b>진하게</b></button>
+      </div>
       <div class="fmt-group" title="정렬">
         <button data-cmd="justifyLeft" aria-label="왼쪽 정렬">좌</button>
         <button data-cmd="justifyCenter" aria-label="가운데 정렬">중</button>
@@ -126,7 +129,7 @@
 <!-- 이미지 확대 -->
 <div class="lightbox hidden" id="lightbox"><img id="lightboxImg" alt="" /></div>
 
-<script src="assets/app.js?v=5"></script>
+<script src="assets/app.js?v=6"></script>
 <script>
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
