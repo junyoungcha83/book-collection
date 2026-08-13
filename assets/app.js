@@ -29,11 +29,19 @@ function setSyncStatus(s) {
   const map = { saving: '동기화중…', saved: '동기화됨 ✓', error: '오프라인', readonly: '로컬 전용', '': '' };
   el.textContent = map[s] ?? ''; el.className = 'sync-status ' + (s || '');
 }
+function canEdit() { return !!getEditToken(); }
+// 편집 가능 여부에 따라 편집기·편집 버튼을 켜고 끈다(평소 읽기전용, 비번 입력 시 편집).
+function applyEditability() {
+  const on = canEdit();
+  document.body.classList.toggle('readonly', !on);
+  document.querySelectorAll('.edit').forEach(e => e.setAttribute('contenteditable', on ? 'true' : 'false'));
+}
 function updateLockUI() {
   const b = document.getElementById('btnLock'); if (!b) return;
-  const has = !!getEditToken();
+  const has = canEdit();
   b.textContent = has ? '🔓' : '🔒';
-  b.title = has ? '동기화 켜짐 (탭하여 변경/해제)' : '동기화 잠금 — 탭하여 비밀번호 입력';
+  b.title = has ? '편집 켜짐 · 동기화 (탭하여 잠금)' : '읽기전용 — 탭하여 비밀번호 입력 후 편집';
+  applyEditability();
 }
 function migrate(d) {
   const books = (d && Array.isArray(d.books) ? d.books : []).map(b => ({
@@ -79,10 +87,11 @@ async function pushToServer() {
 }
 function promptEditToken() {
   const cur = getEditToken();
-  const v = prompt(cur ? '동기화 비밀번호 (지우고 확인 시 잠금)' : '동기화 비밀번호를 입력하세요', cur);
+  const v = prompt(cur ? '편집 비밀번호 (지우고 확인 시 읽기전용)' : '편집 비밀번호를 입력하세요 (읽기전용 해제)', cur);
   if (v === null) return;
   try { if (v.trim()) localStorage.setItem(TOKEN_KEY, v.trim()); else localStorage.removeItem(TOKEN_KEY); } catch (e) {}
   updateLockUI();
+  if (!document.getElementById('homeView').classList.contains('hidden')) renderHome();   // 홈 힌트·＋타일 갱신
   if (getEditToken()) pushToServer(); else setSyncStatus('readonly');
 }
 // 시작 시 서버에서 불러오기(있으면 채택, 서버가 비었고 로컬이 있으면 업로드)
@@ -121,9 +130,11 @@ function renderHome() {
       <span class="b-title">${esc(b.title || '(제목 없음)')}</span>
       <span class="b-author">${esc(b.author || '')}</span>
     </button>`).join('');
-  grid.innerHTML = add + cards;
+  const emptyHint = (!state.books.length && !canEdit())
+    ? `<div class="ro-hint">🔒 읽기전용입니다.<br>오른쪽 위 자물쇠를 눌러 비밀번호를 입력하면 편집할 수 있어요.</div>` : '';
+  grid.innerHTML = add + cards + emptyHint;
   document.getElementById('bookCount').textContent = state.books.length ? `${state.books.length}권` : '';
-  document.getElementById('tileAdd').onclick = () => openDialog(null);
+  const ta = document.getElementById('tileAdd'); if (ta) ta.onclick = () => openDialog(null);
   grid.querySelectorAll('.tile.book').forEach(t => t.onclick = () => openBook(t.dataset.id));
 }
 
@@ -163,6 +174,7 @@ function openBook(id) {
   setEditorHTML('fMemo', b.memo);
   renderImages();
   setTab('toc');
+  applyEditability();
   document.getElementById('homeView').classList.add('hidden');
   document.getElementById('bookView').classList.remove('hidden');
   document.querySelector('.detail-main').scrollTop = 0;
@@ -192,7 +204,7 @@ function normalizeIndent(ed) {
   if (!ed) return;
   const lead = ed.firstChild;
   const leadText = lead && lead.nodeType === 3 ? lead.textContent : '';
-  ed.style.textIndent = (lead && lead.nodeType === 3 && leadText && !/^[\s　]/.test(leadText)) ? '1.6em' : '';
+  ed.style.textIndent = (lead && lead.nodeType === 3 && leadText && !/^[\s　]/.test(leadText)) ? '1em' : '';
   for (const ch of ed.children) {
     if (ch.tagName === 'DIV' || ch.tagName === 'P') {
       const t = ch.textContent || '';
