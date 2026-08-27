@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>도서모음</title>
-<link rel="stylesheet" href="assets/app.css?v=8" />
+<link rel="stylesheet" href="assets/app.css?v=9" />
 
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#14b8a6" />
@@ -52,15 +52,16 @@
     <div class="panel" id="panelToc">
       <div class="edit" id="fToc" data-field="toc" contenteditable="true" data-ph="목차를 입력하세요… (예: 1장 …)"></div>
     </div>
-    <!-- 내용 (텍스트 + 그림/그래프) -->
+    <!-- 내용 (텍스트 + 본문 삽화/표) -->
     <div class="panel hidden" id="panelContent">
-      <div class="edit" id="fContent" data-field="content" contenteditable="true" data-ph="내용을 입력하세요… (아래에서 그림·그래프도 추가할 수 있어요)"></div>
+      <div class="edit" id="fContent" data-field="content" contenteditable="true" data-ph="내용을 입력하세요… (커서 위치에 그림·표를 바로 넣을 수 있어요)"></div>
       <div class="img-bar">
         <button class="btn small" id="btnImportDocx">📄 워드(.docx) 불러오기</button>
-        <button class="btn small" id="btnAddImg">🖼️ 그림/그래프 추가</button>
+        <button class="btn small ghost" id="btnAddImg">🖼️ 보관함에 그림 추가</button>
         <input type="file" accept=".docx" id="docxFile" style="display:none" />
         <input type="file" accept="image/*" id="imgFile" multiple style="display:none" />
       </div>
+      <p class="img-note hidden" id="imgNote">보관함의 그림은 <b>↥ 본문으로</b>를 누르면 커서가 있던 문단 뒤에 삽화로 들어갑니다.</p>
       <div class="img-grid" id="imgGrid"></div>
     </div>
     <!-- 내용요약 -->
@@ -75,10 +76,19 @@
 
   <!-- 서식 툴바 (각 탭 하부 공통) -->
   <div class="fmt-bar" id="fmtBar">
+    <!-- 선택한 그림/표가 있을 때만 나오는 상황별 도구 -->
+    <div class="node-bar hidden" id="nodeBar">
+      <span class="node-label" id="nodeLabel"></span>
+      <div class="node-acts" id="nodeActs"></div>
+    </div>
     <div class="fmt-scope" id="fmtScope">
       <span class="fmt-label">적용:</span>
       <button data-scope="sel" class="on">선택</button>
       <button data-scope="all">전체</button>
+      <span class="ins-group">
+        <button id="btnInsImg" title="커서 위치에 그림 넣기">🖼️ 그림</button>
+        <button id="btnInsTable" title="커서 위치에 표 넣기">▦ 표</button>
+      </span>
     </div>
     <div class="fmt-row">
       <div class="fmt-group" title="글자">
@@ -126,10 +136,30 @@
   </form>
 </dialog>
 
+<!-- 표 삽입 모달 -->
+<dialog id="tableDialog" class="dialog">
+  <form method="dialog">
+    <h2>표 넣기</h2>
+    <div class="field-row">
+      <label class="field"><span>행(가로줄)</span>
+        <input type="number" id="fRows" min="1" max="30" value="3" inputmode="numeric" />
+      </label>
+      <label class="field"><span>열(세로줄)</span>
+        <input type="number" id="fCols" min="1" max="10" value="3" inputmode="numeric" />
+      </label>
+    </div>
+    <label class="check"><input type="checkbox" id="fHeader" checked /> <span>첫 줄을 제목 행으로</span></label>
+    <div class="dialog-actions">
+      <button type="button" class="btn ghost" id="tableCancel">취소</button>
+      <button type="button" class="btn" id="tableInsert">넣기</button>
+    </div>
+  </form>
+</dialog>
+
 <!-- 이미지 확대 -->
 <div class="lightbox hidden" id="lightbox"><img id="lightboxImg" alt="" /></div>
 
-<script src="assets/app.js?v=8"></script>
+<script src="assets/app.js?v=9"></script>
 <script>
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

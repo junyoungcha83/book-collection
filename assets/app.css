@@ -15,6 +15,8 @@ body.readonly .tile.add,
 body.readonly #btnEditInfo,
 body.readonly #btnDelete,
 body.readonly .img-bar,
+body.readonly .img-note,
+body.readonly .img-into,
 body.readonly .img-del,
 body.readonly .fmt-bar,
 body.readonly .save-hint{ display:none !important; }
@@ -75,9 +77,48 @@ body.readonly .edit:empty::before{ content:'(내용 없음)'; }
 .edit:focus{ border-color:var(--accent); box-shadow:0 0 0 3px rgba(45,212,191,.18); }
 .edit:empty::before{ content:attr(data-ph); color:var(--muted); }
 .edit img{ max-width:100%; height:auto; }
+.edit::after{ content:''; display:block; clear:both; }   /* 글 옆 삽화(float) 정리 */
 /* 첫 줄 들여쓰기(자동) — 블록 기본 0, .ind 만 들여쓰기(이미 공백으로 시작한 줄은 skip) */
 .edit > div, .edit > p{ text-indent:0; }
 .edit > div.ind, .edit > p.ind{ text-indent:1em; }
+
+/* ── 본문 안 삽화(그림/그래프) ───────────────── */
+.edit figure.fig{ margin:14px auto; padding:0; max-width:100%; text-indent:0; text-align:center; }
+.edit figure.fig img{ display:block; width:100%; height:auto; margin:0 auto;
+  border-radius:10px; border:1px solid var(--border); background:#fff; }
+.edit figure.fig.w-sm{ width:38%; } .edit figure.fig.w-md{ width:58%; }
+.edit figure.fig.w-lg{ width:78%; } .edit figure.fig.w-full{ width:100%; }
+.edit figure.fig.f-left{ float:left; margin:6px 16px 10px 0; }
+.edit figure.fig.f-right{ float:right; margin:6px 0 10px 16px; }
+.edit figure.fig figcaption{ font-size:.82rem; line-height:1.5; color:var(--muted); margin-top:5px; text-align:center; outline:none; }
+.edit figure.fig figcaption:empty::before{ content:attr(data-ph); color:#94a3b8; }
+.edit figure.fig.sel{ outline:2px solid var(--mint); outline-offset:4px; border-radius:12px; }
+body.readonly .edit figure.fig figcaption:empty{ display:none; }
+body.readonly .edit figure.fig img{ cursor:zoom-in; }
+@media (max-width:420px){ .edit figure.fig.w-sm{ width:48%; } .edit figure.fig.w-md{ width:70%; } }
+
+/* ── 본문 안 표 ──────────────────────────────── */
+.edit .tbl-wrap{ margin:14px 0; overflow-x:auto; -webkit-overflow-scrolling:touch; text-indent:0; }
+.edit table.tbl{ border-collapse:collapse; width:100%; min-width:280px; font-size:.94rem; background:#fff; }
+.edit table.tbl th, .edit table.tbl td{ border:1px solid #cbd5e1; padding:7px 9px;
+  min-width:52px; vertical-align:top; line-height:1.5; text-indent:0; outline:none; }
+.edit table.tbl th{ background:#f0fdfa; font-weight:800; text-align:center; }
+.edit table.tbl td.cell-on, .edit table.tbl th.cell-on{ box-shadow:inset 0 0 0 2px var(--mint); }
+body.readonly .edit table.tbl td.cell-on, body.readonly .edit table.tbl th.cell-on{ box-shadow:none; }
+
+/* ── 상황별 도구(선택한 그림/표) ─────────────── */
+.node-bar{ display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  background:#ecfdf5; border:1px solid var(--mint-lt); border-radius:10px; padding:6px 8px; }
+.node-label{ font-size:.78rem; font-weight:800; color:var(--mint-dark); white-space:nowrap; }
+.node-acts{ display:flex; flex-wrap:wrap; gap:5px; }
+.node-acts button{ border:1px solid var(--border); background:#fff; color:var(--text);
+  border-radius:7px; padding:6px 9px; font-size:.8rem; font-weight:700; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+.node-acts button.on{ background:var(--mint); border-color:var(--mint); color:#fff; }
+.node-acts button.danger{ color:#b91c1c; border-color:#fecaca; }
+.ins-group{ margin-left:auto; display:flex; gap:5px; }
+.ins-group button{ border:1px solid var(--mint); background:var(--mint); color:#fff;
+  border-radius:8px; padding:5px 10px; font-size:.82rem; font-weight:800; cursor:pointer; -webkit-tap-highlight-color:transparent; }
+.ins-group button:active{ background:var(--mint-dark); }
 
 /* 서식 툴바 (하단 고정) */
 .fmt-bar{ position:sticky; bottom:0; z-index:15; background:var(--card); border-top:1px solid var(--border);
@@ -99,8 +140,11 @@ body.readonly .edit:empty::before{ content:'(내용 없음)'; }
 .fmt-group.colors .sw.custom{ display:inline-flex; align-items:center; justify-content:center; overflow:hidden; position:relative; background:conic-gradient(red,orange,yellow,lime,cyan,blue,magenta,red); }
 .fmt-group.colors .sw.custom input{ position:absolute; inset:-4px; width:calc(100% + 8px); height:calc(100% + 8px); opacity:0; cursor:pointer; }
 
-/* 내용 탭 이미지 */
-.img-bar{ margin:12px 0 8px; }
+/* 내용 탭 그림 보관함 */
+.img-bar{ margin:12px 0 8px; display:flex; flex-wrap:wrap; gap:8px; }
+.img-note{ margin:0 0 8px; font-size:.78rem; color:var(--muted); }
+.img-into{ position:absolute; left:6px; bottom:6px; border:none; border-radius:99px;
+  background:rgba(15,118,110,.92); color:#fff; font-size:.74rem; font-weight:800; padding:5px 9px; cursor:pointer; }
 .img-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
 @media (min-width:560px){ .img-grid{ grid-template-columns:repeat(3,1fr); } }
 .img-item{ position:relative; border:1px solid var(--border); border-radius:12px; overflow:hidden; background:#f8fafc; }
@@ -132,6 +176,11 @@ body.readonly .edit:empty::before{ content:'(내용 없음)'; }
 .field input{ width:100%; border:1px solid var(--border); border-radius:10px; padding:11px 12px;
   font-size:1rem; font-family:inherit; outline:none; }
 .field input:focus{ border-color:var(--accent); box-shadow:0 0 0 3px rgba(45,212,191,.18); }
+.field-row{ display:flex; gap:10px; }
+.field-row .field{ flex:1; }
+.check{ display:flex; align-items:center; gap:8px; font-size:.88rem; font-weight:700;
+  color:var(--muted); margin:2px 0 14px; cursor:pointer; }
+.check input{ width:18px; height:18px; accent-color:var(--mint); }
 .dialog-actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:6px; }
 
 /* 이미지 확대 */

@@ -14,6 +14,10 @@ let editId = null;       // 다이얼로그 수정 대상(없으면 추가)
 let saveTimer = null;    // 텍스트 입력 → localStorage 디바운스
 let _syncTimer = null, _syncCtrl = null;
 let _lastTimer = null;
+let lastRange = null;    // 편집기 안 마지막 커서 위치(접힌 선택 포함) — 삽입 지점
+let selFigure = null;    // 선택된 본문 그림(figure.fig)
+let curTable = null, curCell = null;   // 커서가 놓인 표/칸
+let imgTarget = 'inline';              // 그림 파일 선택 용도: 'inline'(본문) | 'gallery'(보관함)
 
 // ── 저장/로드 + 서버 동기화 ──────────────────
 function load() {
@@ -35,6 +39,9 @@ function applyEditability() {
   const on = canEdit();
   document.body.classList.toggle('readonly', !on);
   document.querySelectorAll('.edit').forEach(e => e.setAttribute('contenteditable', on ? 'true' : 'false'));
+  // 삽화 캡션은 figure(contenteditable=false) 안에 있어 따로 꺼 줘야 한다
+  document.querySelectorAll('.edit figcaption').forEach(c => c.setAttribute('contenteditable', on ? 'true' : 'false'));
+  if (!on) { selFigure = curTable = curCell = null; renderNodeBar(); }
 }
 function updateLockUI() {
   const b = document.getElementById('btnLock'); if (!b) return;
@@ -189,10 +196,12 @@ function setTab(tab) {
   document.querySelectorAll('#tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   const map = { toc: 'panelToc', content: 'panelContent', summary: 'panelSummary', memo: 'panelMemo' };
   Object.entries(map).forEach(([k, id]) => document.getElementById(id).classList.toggle('hidden', k !== tab));
+  selFigure = curTable = curCell = null; lastRange = null; renderNodeBar();
   saveLast();
 }
 function backHome() {
   curId = null;
+  selFigure = curTable = curCell = null; lastRange = savedRange = null; renderNodeBar();
   document.getElementById('bookView').classList.add('hidden');
   document.getElementById('homeView').classList.remove('hidden');
   renderHome();
@@ -306,19 +315,222 @@ function fmtAlign(cmd) { withScope(() => document.execCommand(cmd)); }
 function fmtSize(sz) { withScope(() => document.execCommand('fontSize', false, sz)); }
 function fmtColor(c) { withScope(() => document.execCommand('foreColor', false, c)); }
 
-// ── 내용 탭: 그림/그래프 ─────────────────────
+// ── 본문 삽입: 그림·표 ───────────────────────
+// 커서가 놓인 최상위 블록(문단/표/그림)을 찾는다 — 삽입 기준점.
+function topBlockOf(ed, node) {
+  let n = node;
+  while (n && n.parentNode && n.parentNode !== ed) n = n.parentNode;
+  return (n && n.parentNode === ed) ? n : null;
+}
+// 현재 문단 바로 뒤에 블록(그림/표)을 넣고, 이어서 쓸 빈 줄을 만든다.
+function insertBlock(el) {
+  const ed = activeEditor(); if (!ed) return false;
+  const r = (lastRange && ed.contains(lastRange.commonAncestorContainer)) ? lastRange : null;
+  const anchor = r ? topBlockOf(ed, r.startContainer) : null;
+  const tail = document.createElement('div'); tail.innerHTML = '<br>';
+  if (anchor) { anchor.after(el); el.after(tail); }
+  else { ed.appendChild(el); ed.appendChild(tail); }
+  const nr = document.createRange(); nr.setStart(tail, 0); nr.collapse(true);
+  const s = window.getSelection(); s.removeAllRanges(); s.addRange(nr);
+  lastRange = nr.cloneRange();
+  normalizeIndent(ed); saveActiveField();
+  el.scrollIntoView({ block: 'nearest' });
+  return true;
+}
+function makeFigure(src, size) {
+  const fig = document.createElement('figure');
+  fig.className = 'fig w-' + (size || 'md');
+  fig.setAttribute('contenteditable', 'false');
+  const img = document.createElement('img'); img.src = src; img.alt = '';
+  const cap = document.createElement('figcaption');
+  cap.setAttribute('contenteditable', 'true'); cap.setAttribute('data-ph', '설명(선택)');
+  fig.append(img, cap);
+  return fig;
+}
+function makeTable(rows, cols, header) {
+  const wrap = document.createElement('div'); wrap.className = 'tbl-wrap';
+  const t = document.createElement('table'); t.className = 'tbl';
+  const tb = document.createElement('tbody');
+  for (let r = 0; r < rows; r++) {
+    const tr = document.createElement('tr');
+    for (let c = 0; c < cols; c++) {
+      const cell = document.createElement(header && r === 0 ? 'th' : 'td');
+      cell.innerHTML = '<br>';
+      tr.appendChild(cell);
+    }
+    tb.appendChild(tr);
+  }
+  t.appendChild(tb); wrap.appendChild(t);
+  return wrap;
+}
+function insertTableFromDialog() {
+  const rows = Math.min(30, Math.max(1, parseInt(document.getElementById('fRows').value, 10) || 3));
+  const cols = Math.min(10, Math.max(1, parseInt(document.getElementById('fCols').value, 10) || 3));
+  const header = document.getElementById('fHeader').checked;
+  const wrap = makeTable(rows, cols, header);
+  document.getElementById('tableDialog').close();
+  if (!insertBlock(wrap)) return;
+  const first = wrap.querySelector('th,td');
+  if (first) { const r = document.createRange(); r.setStart(first, 0); r.collapse(true);
+    const s = window.getSelection(); s.removeAllRanges(); s.addRange(r); lastRange = r.cloneRange(); }
+  refreshCtx(); flashSaved();
+}
+// 그림 파일 → 본문 커서 위치에 차례로 삽입
+function insertImageFiles(files, size) {
+  const list = Array.from(files || []); if (!list.length) return;
+  let done = 0, full = false;
+  const next = () => {
+    if (done >= list.length) {
+      if (full) alert('일부 그림은 용량 때문에 넣지 못했어요.');
+      if (!save()) alert('저장 공간이 부족해요. 그림 수를 줄여 주세요.');
+      flashSaved(); return;
+    }
+    downscale(list[done], durl => {
+      if (durl) insertBlock(makeFigure(durl, size)); else full = true;
+      done++; next();
+    });
+  };
+  next();
+}
+
+// ── 선택한 그림/표 도구 ──────────────────────
+function markCtx() {
+  const ed = activeEditor(); if (!ed) return;
+  ed.querySelectorAll('figure.fig.sel').forEach(f => f.classList.remove('sel'));
+  ed.querySelectorAll('.cell-on').forEach(c => c.classList.remove('cell-on'));
+  if (selFigure) selFigure.classList.add('sel');
+  if (curCell) curCell.classList.add('cell-on');
+}
+// 현재 커서/클릭 위치가 그림 안인지 표 안인지 판단해 도구 막대를 갱신
+function refreshCtx(clickTarget) {
+  const ed = activeEditor();
+  if (!ed || !canEdit()) { selFigure = curTable = curCell = null; renderNodeBar(); return; }
+  let fig = null, cell = null;
+  if (clickTarget && clickTarget.closest) {
+    fig = clickTarget.closest('figure.fig');
+    cell = clickTarget.closest('td,th');
+    if (fig && !ed.contains(fig)) fig = null;
+    if (cell && !ed.contains(cell)) cell = null;
+  }
+  if (!fig && !cell) {
+    const s = window.getSelection();
+    const a = s && s.anchorNode ? (s.anchorNode.nodeType === 1 ? s.anchorNode : s.anchorNode.parentElement) : null;
+    // 그림(contenteditable=false)을 고르면 커서가 편집기 자체에 걸리기도 한다 → 선택 유지
+    if (!clickTarget && selFigure && (a === ed || !a)) return;
+    if (a && ed.contains(a)) { fig = a.closest('figure.fig'); cell = a.closest('td,th'); }
+    else if (!clickTarget) return;                 // 편집기 밖 선택은 무시(도구 유지)
+  }
+  if (cell) { curCell = cell; curTable = cell.closest('table.tbl'); selFigure = null; }
+  else { selFigure = fig || null; curTable = curCell = null; }
+  markCtx(); renderNodeBar();
+}
+function renderNodeBar() {
+  const bar = document.getElementById('nodeBar'); if (!bar) return;
+  const lab = document.getElementById('nodeLabel'), acts = document.getElementById('nodeActs');
+  const btn = (act, txt, on, cls) => `<button data-act="${act}" class="${on ? 'on' : ''} ${cls || ''}">${txt}</button>`;
+  if (selFigure) {
+    const w = ['sm', 'md', 'lg', 'full'].find(s => selFigure.classList.contains('w-' + s)) || 'md';
+    const al = selFigure.classList.contains('f-left') ? 'left' : selFigure.classList.contains('f-right') ? 'right' : 'center';
+    lab.textContent = '🖼️ 그림';
+    acts.innerHTML =
+      btn('size:sm', '작게', w === 'sm') + btn('size:md', '중간', w === 'md') +
+      btn('size:lg', '크게', w === 'lg') + btn('size:full', '꽉', w === 'full') +
+      btn('al:left', '◧ 글 왼쪽', al === 'left') + btn('al:center', '가운데', al === 'center') +
+      btn('al:right', '글 오른쪽 ◨', al === 'right') +
+      btn('fig:del', '🗑 삭제', false, 'danger');
+    bar.classList.remove('hidden');
+  } else if (curTable) {
+    const isTh = !!(curTable.rows[0] && curTable.rows[0].cells[0] && curTable.rows[0].cells[0].tagName === 'TH');
+    lab.textContent = '▦ 표';
+    acts.innerHTML =
+      btn('row:add', '＋행') + btn('row:del', '－행') +
+      btn('col:add', '＋열') + btn('col:del', '－열') +
+      btn('tbl:header', '제목행', isTh) +
+      btn('tbl:del', '🗑 표 삭제', false, 'danger');
+    bar.classList.remove('hidden');
+  } else {
+    bar.classList.add('hidden'); acts.innerHTML = ''; lab.textContent = '';
+  }
+}
+function nodeAct(act) {
+  const ed = activeEditor(); if (!ed) return;
+  const [kind, val] = act.split(':');
+  if (kind === 'size' && selFigure) {
+    selFigure.classList.remove('w-sm', 'w-md', 'w-lg', 'w-full');
+    selFigure.classList.add('w-' + val);
+    if (val === 'full') selFigure.classList.remove('f-left', 'f-right');
+  } else if (kind === 'al' && selFigure) {
+    selFigure.classList.remove('f-left', 'f-right');
+    if (val === 'left') selFigure.classList.add('f-left');
+    if (val === 'right') selFigure.classList.add('f-right');
+    if (val !== 'center' && selFigure.classList.contains('w-full')) {
+      selFigure.classList.remove('w-full'); selFigure.classList.add('w-md');
+    }
+  } else if (kind === 'fig' && selFigure) {
+    if (!confirm('이 그림을 본문에서 지울까요?')) return;
+    selFigure.remove(); selFigure = null;
+  } else if (kind === 'row' && curTable) {
+    const tr = curCell ? curCell.parentNode : curTable.rows[curTable.rows.length - 1];
+    if (val === 'add') {
+      const nr = curTable.insertRow(tr.rowIndex + 1);
+      for (let i = 0; i < tr.cells.length; i++) nr.insertCell().innerHTML = '<br>';
+    } else {
+      if (curTable.rows.length <= 1) { alert('마지막 행은 지울 수 없어요. 표 삭제를 눌러 주세요.'); return; }
+      tr.remove(); curCell = null;
+    }
+  } else if (kind === 'col' && curTable) {
+    const idx = curCell ? curCell.cellIndex : (curTable.rows[0].cells.length - 1);
+    if (val === 'add') {
+      for (const r of curTable.rows) {
+        const c = document.createElement(r.cells[idx] ? r.cells[idx].tagName : 'TD');
+        c.innerHTML = '<br>';
+        r.insertBefore(c, r.cells[idx + 1] || null);
+      }
+    } else {
+      if (curTable.rows[0].cells.length <= 1) { alert('마지막 열은 지울 수 없어요. 표 삭제를 눌러 주세요.'); return; }
+      for (const r of curTable.rows) if (r.cells[idx]) r.deleteCell(idx);
+      curCell = null;
+    }
+  } else if (kind === 'tbl' && curTable) {
+    if (val === 'header') {
+      const r0 = curTable.rows[0]; if (!r0) return;
+      const to = r0.cells[0].tagName === 'TH' ? 'td' : 'th';
+      Array.from(r0.cells).forEach(c => {
+        const n = document.createElement(to); n.innerHTML = c.innerHTML || '<br>';
+        c.replaceWith(n);
+      });
+      curCell = null;
+    } else {
+      if (!confirm('이 표를 지울까요?')) return;
+      (curTable.closest('.tbl-wrap') || curTable).remove();
+      curTable = curCell = null;
+    }
+  }
+  markCtx(); renderNodeBar(); saveActiveField();
+}
+
+// ── 내용 탭: 그림 보관함 ─────────────────────
 function renderImages() {
   const b = bookById(curId); if (!b) return;
   const box = document.getElementById('imgGrid');
+  const note = document.getElementById('imgNote');
   box.innerHTML = (b.images || []).map((src, i) => `
     <div class="img-item">
       <img src="${src}" data-i="${i}" alt="그림 ${i + 1}" />
+      <button class="img-into" data-i="${i}">↥ 본문으로</button>
       <button class="img-del" data-i="${i}" aria-label="삭제">✕</button>
     </div>`).join('');
+  if (note) note.classList.toggle('hidden', !(b.images || []).length);
   box.querySelectorAll('img').forEach(im => im.onclick = () => openLightbox(im.src));
   box.querySelectorAll('.img-del').forEach(btn => btn.onclick = () => {
     if (!confirm('이 그림을 삭제할까요?')) return;
     b.images.splice(+btn.dataset.i, 1); save(); renderImages(); flashSaved();
+  });
+  // 보관함 → 본문 커서 위치로 옮기기
+  box.querySelectorAll('.img-into').forEach(btn => btn.onclick = () => {
+    const i = +btn.dataset.i, src = b.images[i]; if (!src) return;
+    if (!insertBlock(makeFigure(src, 'md'))) return;
+    b.images.splice(i, 1); save(); renderImages(); flashSaved();
   });
 }
 function addImageFiles(fileEl) {
@@ -396,38 +608,109 @@ async function zipRead(zip, name) {
   const comp = u8.subarray(start, start + e.compSize);
   return e.method === 0 ? comp : await inflateRaw(comp);
 }
-// document.xml → 서식 HTML(문단 정렬 + 굵게/기울임/밑줄)
-function docxXmlToHtml(xmlText) {
-  const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
-  const paras = doc.getElementsByTagName('w:p');
-  const jcMap = { center: 'center', right: 'right', both: 'justify', left: 'left', start: 'left', end: 'right' };
-  let out = '';
-  for (const p of paras) {
-    const jc = p.getElementsByTagName('w:jc')[0];
-    const align = jc ? jcMap[jc.getAttribute('w:val')] : '';
-    let inner = '';
-    for (const r of p.getElementsByTagName('w:r')) {
-      const rpr = r.getElementsByTagName('w:rPr')[0];
-      const b = rpr && rpr.getElementsByTagName('w:b').length;
-      const i = rpr && rpr.getElementsByTagName('w:i').length;
-      const u = rpr && rpr.getElementsByTagName('w:u').length;
-      let t = '';
-      for (const c of r.childNodes) {
-        const nm = c.nodeName;
-        if (nm === 'w:t') t += c.textContent;
-        else if (nm === 'w:tab') t += '    ';
-        else if (nm === 'w:br' || nm === 'w:cr') t += '\n';
+// 실행(run) 묶음 → HTML. 그림은 자리표시자(%%IMG:관계ID|크기%%)로 두고 나중에 채운다.
+function docxRunsHtml(p, wantIds) {
+  let inner = '';
+  for (const r of p.getElementsByTagName('w:r')) {
+    const rpr = r.getElementsByTagName('w:rPr')[0];
+    const bold = rpr && rpr.getElementsByTagName('w:b').length;
+    const ital = rpr && rpr.getElementsByTagName('w:i').length;
+    const und = rpr && rpr.getElementsByTagName('w:u').length;
+    let t = '';
+    for (const c of r.childNodes) {
+      const nm = c.nodeName;
+      if (nm === 'w:t') t += c.textContent;
+      else if (nm === 'w:tab') t += '    ';
+      else if (nm === 'w:br' || nm === 'w:cr') t += '\n';
+      else if (nm === 'w:drawing' || nm === 'w:pict' || nm === 'w:object') {
+        const ref = docxImageRef(c);
+        if (ref) { wantIds.add(ref.id); inner += `%%IMG:${ref.id}|${ref.size}%%`; }
       }
-      if (!t) continue;
-      let h = esc(t).replace(/\n/g, '<br>');
-      if (b) h = `<b>${h}</b>`;
-      if (i) h = `<i>${h}</i>`;
-      if (u) h = `<u>${h}</u>`;
-      inner += h;
     }
-    out += `<div${align ? ` style="text-align:${align}"` : ''}>${inner || '<br>'}</div>`;
+    if (!t) continue;
+    let h = esc(t).replace(/\n/g, '<br>');
+    if (bold) h = `<b>${h}</b>`;
+    if (ital) h = `<i>${h}</i>`;
+    if (und) h = `<u>${h}</u>`;
+    inner += h;
   }
-  return out;
+  return inner;
+}
+// 그림 노드 → {id: 관계ID, size: 문서에 박힌 폭으로 고른 크기}
+function docxImageRef(node) {
+  const blip = node.getElementsByTagName('a:blip')[0];
+  const vml = node.getElementsByTagName('v:imagedata')[0];
+  const id = blip ? (blip.getAttribute('r:embed') || blip.getAttribute('r:link'))
+    : vml ? vml.getAttribute('r:id') : null;
+  if (!id) return null;
+  const ext = node.getElementsByTagName('wp:extent')[0];
+  const cx = ext ? parseInt(ext.getAttribute('cx') || '0', 10) : 0;   // EMU (914400 = 1인치)
+  const inch = cx / 914400;
+  const size = !inch ? 'md' : inch >= 5 ? 'full' : inch >= 3.4 ? 'lg' : inch >= 2 ? 'md' : 'sm';
+  return { id, size };
+}
+// w:tbl → 표 HTML (가로 병합 지원, 세로 병합은 빈 칸으로)
+function docxTblHtml(tbl, wantIds) {
+  let h = '<div class="tbl-wrap"><table class="tbl"><tbody>';
+  let first = true;
+  for (const tr of tbl.children) {
+    if (tr.nodeName !== 'w:tr') continue;
+    const trPr = tr.getElementsByTagName('w:trPr')[0];
+    const tag = (first && trPr && trPr.getElementsByTagName('w:tblHeader').length) ? 'th' : 'td';
+    h += '<tr>';
+    for (const tc of tr.children) {
+      if (tc.nodeName !== 'w:tc') continue;
+      const pr = tc.getElementsByTagName('w:tcPr')[0];
+      const gs = pr && pr.getElementsByTagName('w:gridSpan')[0];
+      const span = gs ? (parseInt(gs.getAttribute('w:val') || '1', 10) || 1) : 1;
+      const paras = Array.from(tc.children).filter(n => n.nodeName === 'w:p');
+      const body = paras.map(p => docxRunsHtml(p, wantIds)).filter(Boolean).join('<br>') || '<br>';
+      h += `<${tag}${span > 1 ? ` colspan="${span}"` : ''}>${body}</${tag}>`;
+    }
+    h += '</tr>'; first = false;
+  }
+  return h + '</tbody></table></div>';
+}
+// document.xml → 본문 HTML(문단 서식 + 표 + 그림 자리표시자)
+function docxXmlToHtml(xmlText, wantIds) {
+  const doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+  const body = doc.getElementsByTagName('w:body')[0];
+  if (!body) return { html: '', paras: 0, tables: 0 };
+  const jcMap = { center: 'center', right: 'right', both: 'justify', left: 'left', start: 'left', end: 'right' };
+  let out = '', paras = 0, tables = 0;
+  for (const node of body.children) {
+    if (node.nodeName === 'w:p') {
+      const jc = node.getElementsByTagName('w:jc')[0];
+      const align = jc ? jcMap[jc.getAttribute('w:val')] : '';
+      out += `<div${align ? ` style="text-align:${align}"` : ''}>${docxRunsHtml(node, wantIds) || '<br>'}</div>`;
+      paras++;
+    } else if (node.nodeName === 'w:tbl') {
+      out += docxTblHtml(node, wantIds); tables++;
+    }
+  }
+  return { html: out, paras, tables };
+}
+// 관계ID → word/media 파일 → 축소한 data URL
+async function docxImageMap(zip, ids) {
+  const map = {};
+  if (!ids.size) return map;
+  const relBytes = await zipRead(zip, 'word/_rels/document.xml.rels');
+  if (!relBytes) return map;
+  const rdoc = new DOMParser().parseFromString(new TextDecoder('utf-8').decode(relBytes), 'application/xml');
+  const targets = {};
+  for (const rel of rdoc.getElementsByTagName('Relationship')) targets[rel.getAttribute('Id')] = rel.getAttribute('Target') || '';
+  for (const id of ids) {
+    let t = targets[id]; if (!t) continue;
+    t = t.replace(/^\/+/, '').replace(/^\.\.\//, '');
+    const name = t.startsWith('word/') ? t : 'word/' + t;
+    const ext = (name.split('.').pop() || '').toLowerCase();
+    if (!/^(png|jpe?g|gif|webp|bmp)$/.test(ext)) continue;   // 브라우저가 못 그리는 형식(emf/wmf)은 건너뜀
+    const bytes = await zipRead(zip, name); if (!bytes) continue;
+    const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
+    const durl = await new Promise(res => downscale(new File([bytes], name, { type: mime }), res));
+    if (durl) map[id] = durl;
+  }
+  return map;
 }
 async function importDocx(file) {
   if (typeof DecompressionStream === 'undefined') { alert('이 브라우저는 워드 불러오기를 지원하지 않아요(최신 크롬/사파리 필요).'); return; }
@@ -439,24 +722,24 @@ async function importDocx(file) {
     const zip = readZipEntries(u8);
     const docBytes = await zipRead(zip, 'word/document.xml');
     if (!docBytes) throw new Error('no_document_xml');
-    const html = docxXmlToHtml(new TextDecoder('utf-8').decode(docBytes));
-    // 편집기에 추가(기존 내용 뒤에)
-    const ed = document.getElementById('fContent');
-    ed.innerHTML = (ed.innerHTML && ed.innerHTML !== '<br>') ? ed.innerHTML + '<hr>' + html : html;
-    b.content = ed.innerHTML;
-    // 문서 내 이미지 → 그림 목록에 추가(다운스케일)
-    b.images = b.images || [];
-    const media = Object.keys(zip.entries).filter(n => /^word\/media\/.*\.(png|jpe?g|gif|webp|bmp)$/i.test(n));
+    const wantIds = new Set();
+    const { html, paras, tables } = docxXmlToHtml(new TextDecoder('utf-8').decode(docBytes), wantIds);
+    // 그림을 원래 있던 자리에 그대로 끼워 넣는다
+    const imgMap = await docxImageMap(zip, wantIds);
     let imgCount = 0;
-    for (const name of media) {
-      const bytes = await zipRead(zip, name); if (!bytes) continue;
-      const ext = name.split('.').pop().toLowerCase();
-      const mime = ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
-      const durl = await new Promise(res => downscale(new File([bytes], name, { type: mime }), res));
-      if (durl) { b.images.push(durl); imgCount++; }
-    }
-    save(); renderImages(); flashSaved();
-    alert(`불러왔어요 📄  (문단 ${zip ? html.split('<div').length - 1 : 0}개${imgCount ? `, 그림 ${imgCount}장` : ''})`);
+    const filled = html.replace(/%%IMG:([^|%]+)\|([a-z]+)%%/g, (_, id, size) => {
+      const src = imgMap[id]; if (!src) return '';
+      imgCount++;
+      return `<figure class="fig w-${size}" contenteditable="false"><img src="${src}" alt="">` +
+             `<figcaption contenteditable="true" data-ph="설명(선택)"></figcaption></figure>`;
+    });
+    const ed = document.getElementById('fContent');
+    ed.innerHTML = (ed.innerHTML && ed.innerHTML !== '<br>') ? ed.innerHTML + '<hr>' + filled : filled;
+    normalizeIndent(ed); applyEditability();
+    b.content = ed.innerHTML;
+    if (!save()) alert('저장 공간이 부족해요. 그림이 많은 문서는 나눠서 불러와 주세요.');
+    renderImages(); flashSaved();
+    alert(`불러왔어요 📄  (문단 ${paras}개${tables ? `, 표 ${tables}개` : ''}${imgCount ? `, 그림 ${imgCount}장` : ''})`);
   } catch (e) {
     alert('워드 파일을 읽지 못했어요. .docx 형식인지 확인해 주세요.');
   } finally {
@@ -484,9 +767,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── 서식 툴바 배선 ──
   // 편집기 안의 '실제 선택(비어있지 않은)'만 기억 → 키보드 닫기/블러로 커서가 접혀도 유지
   document.addEventListener('selectionchange', () => {
-    const s = window.getSelection(); if (!s.rangeCount || s.isCollapsed) return;
-    const ed = activeEditor();
-    if (ed && ed.contains(s.anchorNode) && ed.contains(s.focusNode)) savedRange = s.getRangeAt(0).cloneRange();
+    const s = window.getSelection(); if (!s.rangeCount) return;
+    const ed = activeEditor(); if (!ed) return;
+    const r = s.getRangeAt(0);
+    if (!ed.contains(r.commonAncestorContainer)) return;
+    lastRange = r.cloneRange();                                   // 삽입 지점(접힌 커서 포함)
+    if (!s.isCollapsed && ed.contains(s.focusNode)) savedRange = r.cloneRange();
+    refreshCtx();                                                 // 그림/표 도구 갱신
   });
   // 모바일 키보드가 올라오면 툴바를 키보드 바로 위로 띄워 가려지지 않게
   const vv = window.visualViewport;
@@ -515,11 +802,54 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('dialogSave').onclick = saveDialog;
   document.getElementById('dialogCancel').onclick = () => document.getElementById('bookDialog').close();
   document.getElementById('fBookTitle').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); saveDialog(); } });
-  document.getElementById('btnAddImg').onclick = () => document.getElementById('imgFile').click();
-  document.getElementById('imgFile').onchange = e => addImageFiles(e.target);
+  document.getElementById('btnAddImg').onclick = () => { imgTarget = 'gallery'; document.getElementById('imgFile').click(); };
+  document.getElementById('imgFile').onchange = e => {
+    const el = e.target;
+    if (imgTarget === 'inline') { const files = Array.from(el.files || []); el.value = ''; insertImageFiles(files, 'md'); }
+    else addImageFiles(el);
+  };
   document.getElementById('btnImportDocx').onclick = () => document.getElementById('docxFile').click();
   document.getElementById('docxFile').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) importDocx(f); };
   document.getElementById('lightbox').onclick = () => document.getElementById('lightbox').classList.add('hidden');
+
+  // ── 본문 삽입(그림/표) 배선 ──
+  // 삽입 버튼도 pointerdown 으로 잡아 커서 위치를 잃지 않게 한다.
+  document.getElementById('btnInsImg').addEventListener('pointerdown', e => {
+    e.preventDefault();
+    if (!activeEditor()) return;
+    imgTarget = 'inline'; document.getElementById('imgFile').click();
+  });
+  const tblDlg = document.getElementById('tableDialog');
+  document.getElementById('btnInsTable').addEventListener('pointerdown', e => {
+    e.preventDefault();
+    if (!activeEditor()) return;
+    tblDlg.showModal();
+  });
+  document.getElementById('tableInsert').onclick = insertTableFromDialog;
+  document.getElementById('tableCancel').onclick = () => tblDlg.close();
+  document.getElementById('nodeActs').addEventListener('pointerdown', e => {
+    const btn = e.target.closest('button[data-act]'); if (!btn) return;
+    e.preventDefault(); nodeAct(btn.dataset.act);
+  });
+  // 본문 안 그림 탭 → 편집 중이면 선택(도구 표시), 읽기전용이면 확대
+  document.querySelectorAll('.edit').forEach(ed => {
+    ed.addEventListener('click', e => {
+      const img = e.target.closest('img');
+      if (img && !canEdit()) { openLightbox(img.src); return; }
+      refreshCtx(e.target);
+    });
+    // 사진 붙여넣기 → 커서 자리에 바로 삽입
+    ed.addEventListener('paste', e => {
+      if (!canEdit()) return;
+      const items = Array.from((e.clipboardData && e.clipboardData.items) || []);
+      const files = items.filter(i => i.kind === 'file' && /^image\//.test(i.type)).map(i => i.getAsFile()).filter(Boolean);
+      if (!files.length) return;
+      e.preventDefault();
+      const s = window.getSelection();
+      if (s.rangeCount && ed.contains(s.getRangeAt(0).commonAncestorContainer)) lastRange = s.getRangeAt(0).cloneRange();
+      insertImageFiles(files, 'md');
+    });
+  });
 
   // 마지막 읽던 위치 복원 + 위치 저장(스크롤/이탈 시)
   restoreLast();
