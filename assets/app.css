@@ -65,8 +65,9 @@ body.readonly .edit:empty::before{ content:'(내용 없음)'; }
 .app-header.detail .icon-btn + .icon-btn{ margin-left:0; }
 
 .tabs{ position:sticky; top:var(--header-h); z-index:19; display:flex; background:var(--card); border-bottom:1px solid var(--border); }
-.tab{ flex:1; height:46px; border:none; background:transparent; font-size:.95rem; font-weight:800;
-  color:var(--muted); cursor:pointer; border-bottom:3px solid transparent; }
+.tab{ flex:1; height:46px; padding:0 2px; border:none; background:transparent; font-size:.9rem; font-weight:800;
+  white-space:nowrap; color:var(--muted); cursor:pointer; border-bottom:3px solid transparent; }
+@media (max-width:360px){ .tab{ font-size:.82rem; } }
 .tab.active{ color:var(--mint-dark); border-bottom-color:var(--mint); }
 
 .detail-main{ padding:12px 12px 120px; max-width:860px; margin:0 auto; }
@@ -81,6 +82,8 @@ body.readonly .edit:empty::before{ content:'(내용 없음)'; }
 /* 첫 줄 들여쓰기(자동) — 블록 기본 0, .ind 만 들여쓰기(이미 공백으로 시작한 줄은 skip) */
 .edit > div, .edit > p{ text-indent:0; }
 .edit > div.ind, .edit > p.ind{ text-indent:1em; }
+/* 원본 탭 — 글자만(그림·표가 어떤 경로로 들어와도 보이지 않게) */
+.edit.plain figure, .edit.plain table, .edit.plain img{ display:none; }
 
 /* ── 본문 안 삽화(그림/그래프) ───────────────── */
 .edit figure.fig{ margin:14px auto; padding:0; max-width:100%; text-indent:0; text-align:center; }

@@ -1,4 +1,4 @@
-// 도서모음 — 기기(localStorage) 저장 정적 앱. 책 그리드 + 4탭(목차/내용/내용요약/메모).
+// 도서모음 — 기기(localStorage) 저장 정적 앱. 책 그리드 + 5탭(목차/내용/원본/내용요약/메모).
 'use strict';
 const STORE = 'doso-books-v1';
 const LAST_KEY = 'doso-last';   // 마지막 읽던 위치(책/탭/스크롤/커서)
@@ -56,6 +56,7 @@ function migrate(d) {
     title: String(b.title || ''), author: String(b.author || ''),
     created_at: b.created_at || new Date().toISOString(),
     toc: String(b.toc || ''), content: String(b.content || ''),
+    original: String(b.original || ''),                                // 원본(텍스트 전용)
     summary: String(b.summary || ''), memo: String(b.memo || ''),
     images: Array.isArray(b.images) ? b.images.filter(x => typeof x === 'string') : [],
   }));
@@ -163,20 +164,21 @@ function saveDialog() {
     const b = bookById(editId); if (b) { b.title = title; b.author = author; }
   } else {
     state.books.unshift({ id: genId(), title, author, created_at: new Date().toISOString(),
-      toc: '', content: '', summary: '', memo: '', images: [] });
+      toc: '', content: '', original: '', summary: '', memo: '', images: [] });
   }
   save();
   document.getElementById('bookDialog').close();
   if (curId) { renderDetailHeader(); } else { renderHome(); }
 }
 
-// ── 상세: 4탭 ────────────────────────────────
+// ── 상세: 5탭 ────────────────────────────────
 function openBook(id) {
   curId = id;
   const b = bookById(id); if (!b) return;
   renderDetailHeader();
   setEditorHTML('fToc', b.toc);
   setEditorHTML('fContent', b.content);
+  setEditorHTML('fOriginal', b.original);
   setEditorHTML('fSummary', b.summary);
   setEditorHTML('fMemo', b.memo);
   renderImages();
@@ -194,8 +196,10 @@ function renderDetailHeader() {
 function setTab(tab) {
   curTab = tab;
   document.querySelectorAll('#tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-  const map = { toc: 'panelToc', content: 'panelContent', summary: 'panelSummary', memo: 'panelMemo' };
+  const map = { toc: 'panelToc', content: 'panelContent', original: 'panelOriginal', summary: 'panelSummary', memo: 'panelMemo' };
   Object.entries(map).forEach(([k, id]) => document.getElementById(id).classList.toggle('hidden', k !== tab));
+  // 원본은 텍스트 전용 — 그림·표 삽입 버튼을 감춘다
+  document.querySelector('#fmtScope .ins-group').classList.toggle('hidden', tab === 'original');
   selFigure = curTable = curCell = null; lastRange = null; renderNodeBar();
   saveLast();
 }
@@ -239,6 +243,57 @@ function onFieldInput(e) {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => { save(); flashSaved(); }, 400);
   saveLast();
+}
+
+// ── 원본 탭(텍스트 전용) ────────────────────
+// 평문 → 줄 단위 <div>. 빈 줄도 한 줄로 살리고, 줄 앞 들여쓰기는 &nbsp; 로 지킨다.
+function plainToHtml(t) {
+  const keepLead = s => s.replace(/^[ \t]+/, m => '&nbsp;'.repeat(m.replace(/\t/g, '    ').length));
+  return String(t).replace(/\r\n?/g, '\n').split('\n')
+    .map(l => l ? `<div>${keepLead(esc(l))}</div>` : '<div><br></div>').join('');
+}
+// 커서 자리에 서식 없이 글자만 넣기(붙여넣기용)
+function insertPlainText(ed, txt) {
+  const t = String(txt).replace(/\r\n?/g, '\n');
+  let ok = false;
+  try { ok = document.execCommand('insertText', false, t); } catch (e) {}
+  if (!ok) {
+    const s = window.getSelection();
+    const frag = document.createRange().createContextualFragment(plainToHtml(t));
+    if (s.rangeCount && ed.contains(s.getRangeAt(0).commonAncestorContainer)) {
+      const r = s.getRangeAt(0); r.deleteContents(); r.insertNode(frag); r.collapse(false);
+    } else ed.appendChild(frag);
+  }
+  normalizeIndent(ed);
+  const b = bookById(curId); if (b) { b[ed.dataset.field] = ed.innerHTML; }
+  if (!save()) alert('저장 공간이 부족해요. 원본 글을 나눠서 넣어 주세요.');
+  flashSaved();
+}
+// 한글 txt 는 UTF-8 이 아닐 때가 많다 → 실패하면 EUC-KR(CP949)로 다시 읽는다.
+function decodeText(buf) {
+  try { return new TextDecoder('utf-8', { fatal: true }).decode(buf); }
+  catch (e) {
+    try { return new TextDecoder('euc-kr').decode(buf); }
+    catch (e2) { return new TextDecoder('utf-8').decode(buf); }
+  }
+}
+function importTxt(file) {
+  const ed = document.getElementById('fOriginal');
+  const fr = new FileReader();
+  fr.onerror = () => alert('파일을 읽지 못했어요.');
+  fr.onload = () => {
+    const t = decodeText(fr.result).replace(/^\uFEFF/, '');
+    if (!t.trim()) { alert('글자가 없는 파일이에요.'); return; }
+    const had = !!ed.textContent.trim();
+    if (had && !confirm('원본 탭에 이미 글이 있어요.\n확인을 누르면 뒤에 이어 붙입니다.')) return;
+    ed.innerHTML = had ? ed.innerHTML + plainToHtml('\n' + t) : plainToHtml(t);
+    normalizeIndent(ed);
+    const b = bookById(curId); if (b) b.original = ed.innerHTML;
+    if (!save()) { alert('저장 공간이 부족해요. 글을 나눠서 넣어 주세요.'); return; }
+    flashSaved();
+    ed.scrollIntoView({ block: 'start' });
+  };
+  fr.readAsArrayBuffer(file);
 }
 
 // ── 마지막 읽던 위치(책/탭/스크롤/커서) ──────
@@ -290,7 +345,7 @@ function saveActiveField() {
 let fmtScope = 'sel';   // 'sel' 선택영역 / 'all' 전체
 let savedRange = null;  // 편집기 안의 마지막 선택(버튼 탭으로 포커스 잃어도 복원)
 function activeEditor() {
-  for (const id of ['panelToc', 'panelContent', 'panelSummary', 'panelMemo']) {
+  for (const id of ['panelToc', 'panelContent', 'panelOriginal', 'panelSummary', 'panelMemo']) {
     const p = document.getElementById(id);
     if (p && !p.classList.contains('hidden')) return p.querySelector('.edit');
   }
@@ -836,6 +891,8 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   document.getElementById('btnImportDocx').onclick = () => document.getElementById('docxFile').click();
   document.getElementById('docxFile').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) importDocx(f); };
+  document.getElementById('btnImportTxt').onclick = () => document.getElementById('txtFile').click();
+  document.getElementById('txtFile').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) importTxt(f); };
   document.getElementById('lightbox').onclick = () => document.getElementById('lightbox').classList.add('hidden');
 
   // ── 본문 삽입(그림/표) 배선 ──
@@ -864,9 +921,15 @@ document.addEventListener('DOMContentLoaded', () => {
       if (img && !canEdit()) { openLightbox(img.src); return; }
       refreshCtx(e.target);
     });
-    // 사진 붙여넣기 → 커서 자리에 바로 삽입
+    // 사진 붙여넣기 → 커서 자리에 바로 삽입 (원본 탭은 글자만)
     ed.addEventListener('paste', e => {
       if (!canEdit()) return;
+      if (ed.classList.contains('plain')) {                            // 원본: 서식·그림 없이 글자만
+        e.preventDefault();
+        const txt = (e.clipboardData && e.clipboardData.getData('text/plain')) || '';
+        if (txt) insertPlainText(ed, txt);
+        return;
+      }
       const items = Array.from((e.clipboardData && e.clipboardData.items) || []);
       const files = items.filter(i => i.kind === 'file' && /^image\//.test(i.type)).map(i => i.getAsFile()).filter(Boolean);
       if (!files.length) return;
@@ -874,6 +937,13 @@ document.addEventListener('DOMContentLoaded', () => {
       const s = window.getSelection();
       if (s.rangeCount && ed.contains(s.getRangeAt(0).commonAncestorContainer)) lastRange = s.getRangeAt(0).cloneRange();
       insertImageFiles(files, 'md');
+    });
+    // 원본 탭은 끌어다 놓기도 글자만 받는다(그림·서식 차단)
+    ed.addEventListener('drop', e => {
+      if (!ed.classList.contains('plain') || !canEdit()) return;
+      e.preventDefault();
+      const txt = (e.dataTransfer && e.dataTransfer.getData('text/plain')) || '';
+      if (txt) insertPlainText(ed, txt);
     });
   });
 
