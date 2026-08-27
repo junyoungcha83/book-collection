@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>도서모음</title>
-<link rel="stylesheet" href="assets/app.css?v=9" />
+<link rel="stylesheet" href="assets/app.css?v=10" />
 
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#14b8a6" />
@@ -106,6 +106,7 @@
         <button data-size="7">특대</button>
       </div>
       <div class="fmt-group colors" id="fmtColors" title="글자 색">
+        <span class="grp-label">글자색</span>
         <button class="sw" data-color="#0f172a" style="background:#0f172a"></button>
         <button class="sw" data-color="#ef4444" style="background:#ef4444"></button>
         <button class="sw" data-color="#f97316" style="background:#f97316"></button>
@@ -113,6 +114,18 @@
         <button class="sw" data-color="#2563eb" style="background:#2563eb"></button>
         <button class="sw" data-color="#7c3aed" style="background:#7c3aed"></button>
         <label class="sw custom" title="직접 선택"><input type="color" id="fmtColorPick" value="#14b8a6" /></label>
+      </div>
+      <!-- 글자 음영(형광펜): 고른 글자의 배경색 -->
+      <div class="fmt-group colors" id="fmtHilites" title="글자 음영">
+        <span class="grp-label">음영</span>
+        <button class="sw" data-hilite="#fef08a" style="background:#fef08a"></button>
+        <button class="sw" data-hilite="#bbf7d0" style="background:#bbf7d0"></button>
+        <button class="sw" data-hilite="#bfdbfe" style="background:#bfdbfe"></button>
+        <button class="sw" data-hilite="#fbcfe8" style="background:#fbcfe8"></button>
+        <button class="sw" data-hilite="#fed7aa" style="background:#fed7aa"></button>
+        <button class="sw" data-hilite="#e2e8f0" style="background:#e2e8f0"></button>
+        <label class="sw custom" title="직접 선택"><input type="color" id="fmtHilitePick" value="#fde68a" /></label>
+        <button class="sw none" data-hilite="none" title="음영 지우기" aria-label="음영 지우기"></button>
       </div>
     </div>
   </div>
@@ -159,7 +172,7 @@
 <!-- 이미지 확대 -->
 <div class="lightbox hidden" id="lightbox"><img id="lightboxImg" alt="" /></div>
 
-<script src="assets/app.js?v=9"></script>
+<script src="assets/app.js?v=10"></script>
 <script>
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

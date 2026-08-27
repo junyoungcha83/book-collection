@@ -314,6 +314,29 @@ function withScope(run) {
 function fmtAlign(cmd) { withScope(() => document.execCommand(cmd)); }
 function fmtSize(sz) { withScope(() => document.execCommand('fontSize', false, sz)); }
 function fmtColor(c) { withScope(() => document.execCommand('foreColor', false, c)); }
+// 글자 음영(형광펜) — 고른 글자의 배경색. c='none' 이면 음영 지우기.
+function fmtHilite(c) {
+  withScope(() => {
+    const v = (c === 'none') ? 'transparent' : c;
+    if (!document.execCommand('hiliteColor', false, v)) document.execCommand('backColor', false, v);
+    tidyHilite(activeEditor());
+  });
+}
+// 지우기로 남은 'transparent' 배경과 알맹이 없는 span 을 걷어낸다.
+function tidyHilite(ed) {
+  if (!ed) return;
+  ed.querySelectorAll('[style*="background"]').forEach(el => {
+    const bg = el.style.backgroundColor;
+    if (bg === 'transparent' || /^rgba\(\s*0,\s*0,\s*0,\s*0\s*\)$/.test(bg)) el.style.backgroundColor = '';
+    if (!el.getAttribute('style')) el.removeAttribute('style');
+    if (el.tagName === 'SPAN' && !el.attributes.length) {          // 서식이 하나도 안 남은 껍데기
+      const p = el.parentNode;
+      while (el.firstChild) p.insertBefore(el.firstChild, el);
+      p.removeChild(el);
+    }
+  });
+  ed.normalize();
+}
 
 // ── 본문 삽입: 그림·표 ───────────────────────
 // 커서가 놓인 최상위 블록(문단/표/그림)을 찾는다 — 삽입 기준점.
@@ -797,8 +820,11 @@ document.addEventListener('DOMContentLoaded', () => {
   bindFmt('#fmtBar [data-cmd]', btn => fmtAlign(btn.dataset.cmd));
   bindFmt('#fmtBar [data-size]', btn => fmtSize(btn.dataset.size));
   bindFmt('#fmtColors [data-color]', btn => fmtColor(btn.dataset.color));
+  bindFmt('#fmtHilites [data-hilite]', btn => fmtHilite(btn.dataset.hilite));
   const cp = document.getElementById('fmtColorPick');
   cp.addEventListener('input', () => fmtColor(cp.value));
+  const hp = document.getElementById('fmtHilitePick');
+  hp.addEventListener('input', () => fmtHilite(hp.value));
   document.getElementById('dialogSave').onclick = saveDialog;
   document.getElementById('dialogCancel').onclick = () => document.getElementById('bookDialog').close();
   document.getElementById('fBookTitle').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); saveDialog(); } });

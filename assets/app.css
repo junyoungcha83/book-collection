@@ -139,6 +139,10 @@ body.readonly .edit table.tbl td.cell-on, body.readonly .edit table.tbl th.cell-
   box-shadow:0 0 0 1px var(--border); cursor:pointer; }
 .fmt-group.colors .sw.custom{ display:inline-flex; align-items:center; justify-content:center; overflow:hidden; position:relative; background:conic-gradient(red,orange,yellow,lime,cyan,blue,magenta,red); }
 .fmt-group.colors .sw.custom input{ position:absolute; inset:-4px; width:calc(100% + 8px); height:calc(100% + 8px); opacity:0; cursor:pointer; }
+.fmt-group .grp-label{ align-self:center; padding:0 2px 0 4px; font-size:.72rem; font-weight:800; color:var(--muted); }
+/* 음영 지우기 스위치 — 흰 바탕에 빨간 사선 */
+.fmt-group.colors .sw.none{ background:#fff;
+  background-image:linear-gradient(45deg, transparent 44%, #ef4444 44%, #ef4444 56%, transparent 56%); }
 
 /* 내용 탭 그림 보관함 */
 .img-bar{ margin:12px 0 8px; display:flex; flex-wrap:wrap; gap:8px; }
