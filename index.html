@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>도서모음</title>
-<link rel="stylesheet" href="assets/app.css?v=11" />
+<link rel="stylesheet" href="assets/app.css?v=12" />
 
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#14b8a6" />
@@ -21,8 +21,11 @@
   <header class="app-header">
     <img class="app-logo" src="assets/icon.svg" alt="" />
     <h1>도서모음</h1>
+    <span class="app-ver" id="appVer"></span>
     <span class="app-count" id="bookCount"></span>
     <span class="sync-status" id="syncStatus"></span>
+    <button class="btn-editmode" type="button" aria-pressed="false" hidden>📝 편집</button>
+    <button class="icon-btn" id="btnRefresh" title="새로고침 — 다른 기기에서 고친 내용 받아오기" aria-label="새로고침">🔄</button>
     <button class="icon-btn" id="btnLock" title="동기화 잠금/해제" aria-label="편집 잠금">🔒</button>
   </header>
   <main class="home-main">
@@ -38,6 +41,7 @@
       <h1 id="dTitle">제목</h1>
       <span id="dAuthor">저자</span>
     </div>
+    <button class="btn-editmode" type="button" aria-pressed="false" hidden>📝 편집</button>
     <button class="icon-btn" id="btnEditInfo" title="정보 수정" aria-label="정보 수정">✏️</button>
     <button class="icon-btn" id="btnDelete" title="삭제" aria-label="삭제">🗑</button>
   </header>
@@ -182,7 +186,7 @@
 <!-- 이미지 확대 -->
 <div class="lightbox hidden" id="lightbox"><img id="lightboxImg" alt="" /></div>
 
-<script src="assets/app.js?v=11"></script>
+<script src="assets/app.js?v=12"></script>
 <script>
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));

@@ -3,6 +3,10 @@
 const STORE = 'doso-books-v1';
 const LAST_KEY = 'doso-last';   // 마지막 읽던 위치(책/탭/스크롤/커서)
 const TOKEN_KEY = 'doso-edit-token';
+const BACKUP_KEY = 'doso-books-backup';   // 병합에서 밀려난 로컬본 보관(같은 책을 양쪽에서 고친 경우)
+// 화면 상단에 띄우는 버전. 배포할 때 sw.js 의 CACHE 이름, index.html 의 ?v= 와 같이 올린다.
+// (폰에서 "지금 새 버전이 맞나" 를 눈으로 확인하려고 띄운다)
+const APP_VER = 'v12';
 const API_BASE = 'https://book-collection-api.junyoung-cha83.workers.dev';
 const SYNC_DEBOUNCE_MS = 800;
 const IMG_MAX = 1200;   // 업로드 이미지 다운스케일 최대 변
@@ -13,6 +17,9 @@ let curTab = 'toc';      // 현재 탭
 let editId = null;       // 다이얼로그 수정 대상(없으면 추가)
 let saveTimer = null;    // 텍스트 입력 → localStorage 디바운스
 let _syncTimer = null, _syncCtrl = null;
+let editMode = false;    // 편집 모드(끄면 읽기 전용) — 비밀번호와 별개, 저장하지 않는다
+let _baseline = {};      // bookId → 마지막 동기화 시점의 내용 지문(바뀐 책 찾기용)
+let _pulling = false;    // 서버에서 받아오는 중(중복 요청 방지)
 let _lastTimer = null;
 let lastRange = null;    // 편집기 안 마지막 커서 위치(접힌 선택 포함) — 삽입 지점
 let selFigure = null;    // 선택된 본문 그림(figure.fig)
@@ -20,12 +27,29 @@ let curTable = null, curCell = null;   // 커서가 놓인 표/칸
 let imgTarget = 'inline';              // 그림 파일 선택 용도: 'inline'(본문) | 'gallery'(보관함)
 
 // ── 저장/로드 + 서버 동기화 ──────────────────
+// 폰·맥북을 오가며 쓰므로 한쪽 수정이 다른 쪽 수정을 통째로 덮으면 안 된다. 그래서
+//   · 책마다 updated_at 을 두고, 합칠 때 책 단위로 최신 것을 고른다
+//   · 삭제는 목록에서 빼지 않고 deleted 표시만 남긴다 — 안 그러면 다른 기기에서 되살아난다
+//   · 서버는 rev 를 세고, 내가 받아간 rev 가 아니면 PUT 을 거절한다(409) → 합치고 다시 올린다
 function load() {
   try { const raw = localStorage.getItem(STORE); if (raw) { const d = JSON.parse(raw); if (d && Array.isArray(d.books)) state = migrate(d); } } catch (e) {}
+  resetBaseline();
 }
 function cacheLocal() { try { localStorage.setItem(STORE, JSON.stringify(state)); return true; } catch (e) { return false; } }
-// 저장: 로컬 캐시 + (토큰 있으면) 서버 동기화 예약. 로컬 저장 성공 여부 반환.
-function save() { const ok = cacheLocal(); scheduleSync(); return ok; }
+// 저장: 바뀐 책에 시각 도장 → 로컬 캐시 → (토큰 있으면) 서버 동기화 예약
+function save() { stampChanges(); const ok = cacheLocal(); scheduleSync(); return ok; }
+
+// 어떤 책이 바뀌었는지 알아야 updated_at 을 찍는다. save() 를 부르는 자리가 스무 곳이
+// 넘어서 일일이 손대는 대신, 마지막 동기화 시점의 지문과 비교해 바뀐 책만 찍는다.
+function bookSig(b) { return JSON.stringify([b.title, b.author, b.toc, b.content, b.original, b.summary, b.memo, b.images, !!b.deleted]); }
+function resetBaseline() { _baseline = {}; for (const b of state.books) _baseline[b.id] = bookSig(b); }
+function stampChanges() {
+  const now = new Date().toISOString();
+  for (const b of state.books) {
+    const sig = bookSig(b);
+    if (_baseline[b.id] !== sig) { b.updated_at = now; _baseline[b.id] = sig; }
+  }
+}
 
 function getEditToken() { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; } }
 function setSyncStatus(s) {
@@ -33,8 +57,28 @@ function setSyncStatus(s) {
   const map = { saving: '동기화중…', saved: '동기화됨 ✓', error: '오프라인', readonly: '로컬 전용', '': '' };
   el.textContent = map[s] ?? ''; el.className = 'sync-status ' + (s || '');
 }
-function canEdit() { return !!getEditToken(); }
-// 편집 가능 여부에 따라 편집기·편집 버튼을 켜고 끈다(평소 읽기전용, 비번 입력 시 편집).
+// 편집 권한(비밀번호)과 편집 '모드' 는 다르다.
+// 비밀번호는 한 번 넣으면 남지만, 모드는 평소 꺼져 있어야 읽다가 실수로 지우지 않는다.
+// 모드는 저장하지 않는다 — 앱을 새로 열거나 책을 옮기면 항상 읽기부터 시작한다.
+function hasEditRight() { return !!getEditToken(); }
+function canEdit() { return hasEditRight() && editMode; }
+function setEditMode(on) {
+  editMode = !!on && hasEditRight();
+  document.body.classList.toggle('editing', editMode);
+  updateEditModeUI();
+  applyEditability();
+}
+function updateEditModeUI() {
+  const right = hasEditRight();
+  document.querySelectorAll('.btn-editmode').forEach(b => {
+    b.hidden = !right;                       // 비밀번호가 없으면 자물쇠부터 눌러야 한다
+    b.textContent = editMode ? '✅ 완료' : '📝 편집';
+    b.title = editMode ? '편집 끝내기 — 읽기 모드로' : '편집하기 — 눌러야 글을 고칠 수 있어요';
+    b.setAttribute('aria-pressed', editMode ? 'true' : 'false');
+    b.classList.toggle('on', editMode);
+  });
+}
+// 실제로 고칠 수 있는 상태(비밀번호 O + 편집 모드 O)일 때만 편집기·편집 버튼을 켠다.
 function applyEditability() {
   const on = canEdit();
   document.body.classList.toggle('readonly', !on);
@@ -45,9 +89,10 @@ function applyEditability() {
 }
 function updateLockUI() {
   const b = document.getElementById('btnLock'); if (!b) return;
-  const has = canEdit();
+  const has = hasEditRight();          // 자물쇠는 '권한' 을 나타낸다(편집 모드와 별개)
   b.textContent = has ? '🔓' : '🔒';
-  b.title = has ? '편집 켜짐 · 동기화 (탭하여 잠금)' : '읽기전용 — 탭하여 비밀번호 입력 후 편집';
+  b.title = has ? '편집 권한 있음 · 동기화 (탭하여 잠금)' : '읽기전용 — 탭하여 비밀번호 입력';
+  updateEditModeUI();
   applyEditability();
 }
 function migrate(d) {
@@ -55,13 +100,48 @@ function migrate(d) {
     id: b.id || genId(),
     title: String(b.title || ''), author: String(b.author || ''),
     created_at: b.created_at || new Date().toISOString(),
+    // 예전 데이터엔 updated_at 이 없다 — 만든 시각으로 채워야 합칠 때 기준이 생긴다
+    updated_at: b.updated_at || b.created_at || new Date(0).toISOString(),
+    deleted: !!b.deleted,                                              // 삭제 표시(목록에선 감춘다)
     toc: String(b.toc || ''), content: String(b.content || ''),
     original: String(b.original || ''),                                // 원본(텍스트 전용)
     summary: String(b.summary || ''), memo: String(b.memo || ''),
     images: Array.isArray(b.images) ? b.images.filter(x => typeof x === 'string') : [],
   }));
-  return { version: 1, books };
+  return { version: 1, rev: Number(d && d.rev) || 0, books };
 }
+
+// 로컬과 서버를 책 단위로 합친다. 같은 책은 updated_at 이 나중인 쪽을 택한다.
+// 밀려난 로컬본 중 '아직 서버에 못 올린 수정' 이 있으면 losers 에 담아 따로 보관한다.
+function mergeDocs(local, remote, losers) {
+  const byId = new Map(local.books.map(b => [b.id, b]));
+  for (const r of remote.books) {
+    const l = byId.get(r.id);
+    if (!l) { byId.set(r.id, r); continue; }
+    if ((Date.parse(r.updated_at) || 0) > (Date.parse(l.updated_at) || 0)) {
+      if (losers && _baseline[l.id] !== undefined && _baseline[l.id] !== bookSig(l)) losers.push(l);
+      byId.set(r.id, r);
+    }
+  }
+  // 새로 만든 책은 앞으로(홈에서 맨 앞에 보이게), 나머지는 서버 순서를 따른다
+  const remoteIds = new Set(remote.books.map(b => b.id));
+  const order = [...local.books.filter(b => !remoteIds.has(b.id)).map(b => b.id), ...remote.books.map(b => b.id)];
+  const seen = new Set(), books = [];
+  for (const id of order) { if (seen.has(id)) continue; seen.add(id); books.push(byId.get(id)); }
+  return { version: 1, rev: remote.rev | 0, books };
+}
+
+// 밀려난 로컬본 보관 — 같은 책을 양쪽에서 고친 경우에만 생긴다.
+// 반드시 cacheLocal() 뒤에 불러야 한다(용량이 차서 본 데이터 저장이 실패하면 안 되므로).
+function stashLosers(losers) {
+  if (!losers || !losers.length) return;
+  try {
+    localStorage.setItem(BACKUP_KEY, JSON.stringify({ at: new Date().toISOString(), books: losers.slice(0, 2) }));
+  } catch (e) { try { localStorage.removeItem(BACKUP_KEY); } catch (_) {} }
+  const names = losers.map(b => b.title || '(제목 없음)').join(', ');
+  alert(`다른 기기에서 더 나중에 고친 내용이 있어 그쪽을 반영했습니다: ${names}\n\n이 기기에 있던 내용은 따로 보관해 뒀습니다(복구 필요하면 알려주세요).`);
+}
+
 async function fetchFromServer() {
   try {
     const res = await fetch(`${API_BASE}/api/data`, { cache: 'no-store' });
@@ -71,12 +151,69 @@ async function fetchFromServer() {
   } catch (e) {}
   return null;
 }
+
+// 서버 문서를 로컬에 합쳐 넣고, 내용이 바뀐 책 id 들을 돌려준다.
+function adoptMerge(remoteDoc) {
+  const before = new Map(state.books.map(b => [b.id, bookSig(b)]));
+  const losers = [];
+  state = mergeDocs(state, migrate(remoteDoc), losers);
+  cacheLocal(); resetBaseline(); stashLosers(losers);
+  const changed = new Set();
+  for (const b of state.books) if (before.get(b.id) !== bookSig(b)) changed.add(b.id);
+  return changed;
+}
+
+// 보고 있던 책이 안 바뀌었으면 건드리지 않는다 — 괜히 다시 그리면 읽던 위치가 튄다.
+// 바뀐 경우에도 openBook() 대신 내용만 갈아끼워 탭과 스크롤은 지킨다.
+function rerenderAfterSync(changed) {
+  if (!curId) { renderHome(); return; }
+  if (!bookById(curId)) { backHome(); return; }          // 다른 기기에서 지운 책
+  if (changed && !changed.has(curId)) { renderDetailHeader(); return; }
+  const b = bookById(curId), y = window.scrollY || 0;
+  renderDetailHeader();
+  setEditorHTML('fToc', b.toc); setEditorHTML('fContent', b.content);
+  setEditorHTML('fOriginal', b.original); setEditorHTML('fSummary', b.summary);
+  setEditorHTML('fMemo', b.memo);
+  renderImages(); applyEditability();
+  requestAnimationFrame(() => window.scrollTo(0, y));
+}
+
+// 새로고침 버튼 — 자동 동기화를 못 믿을 때 손으로 당겨 받는다.
+// 사용자가 일부러 누른 것이므로 편집 중이어도 받아온다(내 수정은 updated_at 이 최신이라 살아남는다).
+async function manualRefresh() {
+  const b = document.getElementById('btnRefresh');
+  if (b) { b.disabled = true; b.classList.add('spin'); }
+  setSyncStatus('saving');
+  try { await pullAndMerge(true); }
+  finally { if (b) { b.disabled = false; b.classList.remove('spin'); } }
+}
+
+// 서버에서 받아와 합치기. 편집 중일 때는 건드리지 않는다(입력하던 내용이 튄다).
+async function pullAndMerge(force) {
+  if (_pulling) return;
+  if (!force) {
+    const ed = document.activeElement;
+    if (ed && ed.classList && ed.classList.contains('edit')) return;
+  }
+  _pulling = true;
+  try {
+    const remote = await fetchFromServer();
+    if (!remote) { setSyncStatus('error'); return; }
+    const changed = adoptMerge(remote);
+    if (changed.size) rerenderAfterSync(changed);
+    // 합친 결과가 서버와 다르면(이 기기에만 있던 수정) 올려 준다
+    if (getEditToken() && JSON.stringify(state.books) !== JSON.stringify(migrate(remote).books)) pushToServer();
+    else setSyncStatus(getEditToken() ? 'saved' : 'readonly');
+  } finally { _pulling = false; }
+}
 function scheduleSync() {
   if (!getEditToken()) { setSyncStatus('readonly'); return; }
   if (_syncTimer) clearTimeout(_syncTimer);
-  _syncTimer = setTimeout(pushToServer, SYNC_DEBOUNCE_MS);
+  _syncTimer = setTimeout(() => pushToServer(), SYNC_DEBOUNCE_MS);
 }
-async function pushToServer() {
+// 내가 받아간 rev 를 같이 보낸다. 그 사이 다른 기기가 저장했으면 서버가 409 로
+// 거절하고 최신본을 돌려준다 → 합쳐서 한 번만 다시 시도한다.
+async function pushToServer(retry = true) {
   const token = getEditToken(); if (!token) return;
   if (_syncCtrl) _syncCtrl.abort();
   _syncCtrl = new AbortController();
@@ -84,10 +221,20 @@ async function pushToServer() {
   try {
     const res = await fetch(`${API_BASE}/api/data`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', 'X-Edit-Token': token },
+      headers: { 'Content-Type': 'application/json', 'X-Edit-Token': token, 'X-Base-Rev': String(state.rev | 0) },
       body: JSON.stringify(state), signal: _syncCtrl.signal,
     });
-    if (res.ok) setSyncStatus('saved');
+    if (res.ok) {
+      const j = await res.json().catch(() => null);
+      if (j && typeof j.rev === 'number') { state.rev = j.rev; cacheLocal(); }
+      setSyncStatus('saved');
+    }
+    else if (res.status === 409) {
+      const j = await res.json().catch(() => null);
+      if (j && j.current) { const ch = adoptMerge(j.current); if (ch.size) rerenderAfterSync(ch); }
+      if (retry) return pushToServer(false);
+      setSyncStatus('error');
+    }
     else if (res.status === 401) { try { localStorage.removeItem(TOKEN_KEY); } catch (e) {} updateLockUI(); setSyncStatus('error'); alert('편집 비밀번호가 잘못됐습니다 — 다시 입력하세요.'); }
     else if (res.status === 413) { setSyncStatus('error'); alert('데이터가 너무 커서 동기화할 수 없어요(그림 용량). 그림 수를 줄여 주세요.'); }
     else setSyncStatus('error');
@@ -98,26 +245,16 @@ function promptEditToken() {
   const v = prompt(cur ? '편집 비밀번호 (지우고 확인 시 읽기전용)' : '편집 비밀번호를 입력하세요 (읽기전용 해제)', cur);
   if (v === null) return;
   try { if (v.trim()) localStorage.setItem(TOKEN_KEY, v.trim()); else localStorage.removeItem(TOKEN_KEY); } catch (e) {}
+  setEditMode(false);          // 비밀번호를 바꿔도 편집은 꺼진 채로 시작한다
   updateLockUI();
   if (!document.getElementById('homeView').classList.contains('hidden')) renderHome();   // 홈 힌트·＋타일 갱신
   if (getEditToken()) pushToServer(); else setSyncStatus('readonly');
 }
-// 시작 시 서버에서 불러오기(있으면 채택, 서버가 비었고 로컬이 있으면 업로드)
+// 시작 시 서버와 맞추기. 이때는 편집기에 포커스가 있어도(읽던 위치 복원 직후)
+// 건너뛰면 안 되므로 force 로 부른다.
 async function syncInitial() {
   setSyncStatus(getEditToken() ? 'saved' : 'readonly');
-  const remote = await fetchFromServer();
-  if (remote && remote.books.length > 0) {
-    state = migrate(remote); cacheLocal();
-    if (curId && !bookById(curId)) backHome();
-    else if (curId) restoreLast();
-    else renderHome();
-    setSyncStatus(getEditToken() ? 'saved' : 'readonly');
-  } else if (remote) {                 // 서버 비어 있음
-    if (getEditToken() && state.books.length) pushToServer();
-    else setSyncStatus(getEditToken() ? 'saved' : 'readonly');
-  } else {                             // 오프라인/오류 → 로컬 유지
-    setSyncStatus('error');
-  }
+  await pullAndMerge(true);
 }
 function flashSaved() {
   const h = document.getElementById('saveHint');
@@ -126,22 +263,26 @@ function flashSaved() {
 }
 function genId() { return 'b_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
-function bookById(id) { return state.books.find(b => b.id === id); }
+// 지운 책은 목록에서 빼지 않고 표시만 남기므로(다른 기기에서 되살아나지 않게)
+// 화면에 쓰는 곳에서는 항상 걸러 낸다.
+function liveBooks() { return state.books.filter(b => !b.deleted); }
+function bookById(id) { const b = state.books.find(x => x.id === id); return b && !b.deleted ? b : undefined; }
 
 // ── 홈: 그리드 ───────────────────────────────
 function renderHome() {
   const grid = document.getElementById('grid');
   const add = `<button class="tile add" id="tileAdd" aria-label="책 추가"><span class="plus">＋</span><span class="add-label">책 추가</span></button>`;
-  const cards = state.books.map(b => `
+  const live = liveBooks();
+  const cards = live.map(b => `
     <button class="tile book" data-id="${b.id}">
       <span class="cover">📖</span>
       <span class="b-title">${esc(b.title || '(제목 없음)')}</span>
       <span class="b-author">${esc(b.author || '')}</span>
     </button>`).join('');
-  const emptyHint = (!state.books.length && !canEdit())
+  const emptyHint = (!live.length && !hasEditRight())
     ? `<div class="ro-hint">🔒 읽기전용입니다.<br>오른쪽 위 자물쇠를 눌러 비밀번호를 입력하면 편집할 수 있어요.</div>` : '';
   grid.innerHTML = add + cards + emptyHint;
-  document.getElementById('bookCount').textContent = state.books.length ? `${state.books.length}권` : '';
+  document.getElementById('bookCount').textContent = live.length ? `${live.length}권` : '';
   const ta = document.getElementById('tileAdd'); if (ta) ta.onclick = () => openDialog(null);
   grid.querySelectorAll('.tile.book').forEach(t => t.onclick = () => openBook(t.dataset.id));
 }
@@ -163,7 +304,8 @@ function saveDialog() {
   if (editId) {
     const b = bookById(editId); if (b) { b.title = title; b.author = author; }
   } else {
-    state.books.unshift({ id: genId(), title, author, created_at: new Date().toISOString(),
+    const now = new Date().toISOString();
+    state.books.unshift({ id: genId(), title, author, created_at: now, updated_at: now, deleted: false,
       toc: '', content: '', original: '', summary: '', memo: '', images: [] });
   }
   save();
@@ -175,6 +317,7 @@ function saveDialog() {
 function openBook(id) {
   curId = id;
   const b = bookById(id); if (!b) return;
+  setEditMode(false);          // 책을 열면 항상 읽기부터 — 실수로 고치는 걸 막는다
   renderDetailHeader();
   setEditorHTML('fToc', b.toc);
   setEditorHTML('fContent', b.content);
@@ -205,6 +348,7 @@ function setTab(tab) {
 }
 function backHome() {
   curId = null;
+  setEditMode(false);
   selFigure = curTable = curCell = null; lastRange = savedRange = null; renderNodeBar();
   document.getElementById('bookView').classList.add('hidden');
   document.getElementById('homeView').classList.remove('hidden');
@@ -831,12 +975,18 @@ document.addEventListener('DOMContentLoaded', () => {
   renderHome();
   updateLockUI();
   document.getElementById('btnLock').onclick = promptEditToken;
+  document.getElementById('btnRefresh').onclick = manualRefresh;
+  document.getElementById('appVer').textContent = APP_VER;
+  document.querySelectorAll('.btn-editmode').forEach(b => b.onclick = () => setEditMode(!editMode));
+  setEditMode(false);          // 시작은 언제나 읽기 모드
   syncInitial();   // 서버에서 최신 목록 받아오기(비동기)
   document.getElementById('btnBack').onclick = backHome;
   document.getElementById('btnDelete').onclick = () => {
     const b = bookById(curId); if (!b) return;
     if (!confirm(`'${b.title}'을(를) 삭제할까요? 되돌릴 수 없어요.`)) return;
-    state.books = state.books.filter(x => x.id !== curId); save(); backHome();
+    // 목록에서 빼는 대신 삭제 표시만 — 안 그러면 다른 기기와 합칠 때 되살아난다
+    b.deleted = true; b.toc = b.content = b.original = b.summary = b.memo = ''; b.images = [];
+    save(); backHome();
   };
   document.getElementById('btnEditInfo').onclick = () => openDialog(curId);
   document.querySelectorAll('#tabs .tab').forEach(t => t.onclick = () => setTab(t.dataset.tab));
@@ -950,6 +1100,12 @@ document.addEventListener('DOMContentLoaded', () => {
   // 마지막 읽던 위치 복원 + 위치 저장(스크롤/이탈 시)
   restoreLast();
   window.addEventListener('scroll', saveLast, { passive: true });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveLast(); });
+  // 앱을 껐다 켜야만 반영되던 문제 — 화면으로 돌아올 때·온라인 복귀 때 서버와 다시 맞춘다.
+  // (예전에는 DOMContentLoaded 때 딱 한 번만 받아와서, 백그라운드에 살아있던 앱은 계속 옛 내용이었다)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') saveLast();
+    else pullAndMerge();
+  });
+  addEventListener('online', () => { pullAndMerge(); if (getEditToken()) scheduleSync(); });
   window.addEventListener('pagehide', saveLast);
 });

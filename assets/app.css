@@ -31,14 +31,44 @@ body.readonly .edit:empty::before{ content:'(내용 없음)'; }
   background:linear-gradient(135deg,var(--mint-lt),var(--mint)); color:#083344;
   box-shadow:0 2px 8px rgba(20,184,166,.25); }
 .app-logo{ width:34px; height:34px; border-radius:8px; flex:0 0 auto; }
-.app-header h1{ font-size:1.2rem; margin:0; font-weight:900; letter-spacing:.5px; }
+.app-header h1{ font-size:1.2rem; margin:0; font-weight:900; letter-spacing:.5px;
+  min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+/* 헤더에 버튼이 늘어 좁은 폰에서 넘칠 수 있다. 글자 쪽이 먼저 줄어들게 해서
+   버튼(편집·새로고침·자물쇠)은 어떤 폭에서도 잘리지 않게 한다. */
+@media (max-width:430px){
+  .app-header{ gap:7px; padding-left:10px; padding-right:10px; }
+  .app-logo{ display:none; }
+  .app-header h1{ font-size:1.05rem; }
+  .btn-editmode{ padding:8px 10px; font-size:.78rem; }
+}
+.app-ver{ font-size:.68rem; font-weight:800; opacity:.65; letter-spacing:.3px; flex:0 0 auto; }
 .app-count{ margin-left:auto; font-size:.85rem; font-weight:700; opacity:.8; }
-.sync-status{ font-size:.72rem; font-weight:700; opacity:.9; white-space:nowrap; }
+/* 새로고침 중에는 아이콘을 돌려 눌린 걸 알린다 */
+@keyframes doso-spin{ to{ transform:rotate(360deg); } }
+#btnRefresh.spin{ animation:doso-spin .8s linear infinite; }
+#btnRefresh:disabled{ opacity:.6; }
+@media (prefers-reduced-motion:reduce){ #btnRefresh.spin{ animation:none; opacity:.6; } }
+.sync-status{ font-size:.72rem; font-weight:700; opacity:.9; white-space:nowrap;
+  min-width:0; flex:0 1 auto; overflow:hidden; text-overflow:ellipsis; }
 .sync-status.saving{ color:#083344; } .sync-status.saved{ color:#065f46; }
 .sync-status.error{ color:#7f1d1d; } .sync-status.readonly{ color:#334155; }
 .icon-btn{ width:38px; height:38px; border:none; background:rgba(255,255,255,.35); color:#083344;
   border-radius:10px; font-size:1.15rem; cursor:pointer; flex:0 0 auto; }
 .icon-btn:active{ background:rgba(255,255,255,.6); }
+
+/* 읽기/편집 모드 스위치 — 비밀번호를 넣어 뒀어도 평소엔 읽기 상태로 두어
+   글을 읽다가 실수로 지우는 일이 없게 한다. 눌러야 편집이 켜진다. */
+.btn-editmode{ border:none; background:rgba(255,255,255,.35); color:#083344;
+  border-radius:999px; padding:8px 12px; font-size:.82rem; font-weight:800;
+  cursor:pointer; flex:0 0 auto; white-space:nowrap; }
+.btn-editmode:active{ background:rgba(255,255,255,.6); }
+.btn-editmode.on{ background:#083344; color:#ecfeff; }
+.btn-editmode[hidden]{ display:none; }
+/* 상세 헤더는 첫 버튼이 오른쪽으로 밀려야 한다 — 그 역할을 이 버튼이 넘겨받는다 */
+.app-header.detail .btn-editmode{ margin-left:auto; }
+.app-header.detail .btn-editmode ~ .icon-btn{ margin-left:0; }
+/* 편집 중에는 글상자 테두리를 살려 지금 고칠 수 있는 상태임을 보이게 */
+body.editing .edit{ box-shadow:inset 0 0 0 2px rgba(13,148,136,.35); border-radius:8px; }
 
 /* 홈 그리드 */
 .home-main{ padding:14px 12px calc(24px + var(--safe-bottom)); max-width:860px; margin:0 auto; }
