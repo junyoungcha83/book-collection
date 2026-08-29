@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>도서모음</title>
-<link rel="stylesheet" href="assets/app.css?v=12" />
+<link rel="stylesheet" href="assets/app.css?v=13" />
 
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#14b8a6" />
@@ -144,6 +144,13 @@
     </div>
   </div>
   <div class="save-hint" id="saveHint">자동 저장됨 ✓</div>
+
+  <!-- 책갈피 — 해제 전까지 이 책을 열 때마다 표시해 둔 자리로 간다 -->
+  <div class="mark-fab" id="markFab" hidden>
+    <button class="mark-set" id="btnMarkSet" type="button">🔖 책갈피</button>
+    <button class="mark-clear" id="btnMarkClear" type="button" aria-label="책갈피 해제" hidden>✕</button>
+  </div>
+  <div class="mark-toast" id="markToast" aria-live="polite"></div>
 </section>
 
 <!-- 책 추가/수정 모달 -->
@@ -186,10 +193,24 @@
 <!-- 이미지 확대 -->
 <div class="lightbox hidden" id="lightbox"><img id="lightboxImg" alt="" /></div>
 
-<script src="assets/app.js?v=12"></script>
+<script src="assets/app.js?v=13"></script>
 <script>
+  // 새 버전이 올라와도 이미 떠 있는 페이지는 옛 코드를 계속 쓴다. 그래서
+  //  ① 새 워커가 제어권을 잡으면 한 번 새로고침해 새 코드로 갈아탄다
+  //  ② 앱이 화면으로 돌아올 때마다 새 버전이 있는지 확인한다
+  //     (폰에서 앱을 백그라운드에 두면 새로 여는 일이 없어 영영 갱신되지 않는다)
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloaded) return; reloaded = true; location.reload();
+    });
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').then(reg => {
+        document.addEventListener('visibilitychange', () => {
+          if (document.visibilityState === 'visible') reg.update().catch(() => {});
+        });
+      }).catch(() => {});
+    });
   }
 </script>
 </body>

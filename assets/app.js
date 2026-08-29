@@ -4,9 +4,10 @@ const STORE = 'doso-books-v1';
 const LAST_KEY = 'doso-last';   // 마지막 읽던 위치(책/탭/스크롤/커서)
 const TOKEN_KEY = 'doso-edit-token';
 const BACKUP_KEY = 'doso-books-backup';   // 병합에서 밀려난 로컬본 보관(같은 책을 양쪽에서 고친 경우)
+const MARK_KEY = 'doso-marks';            // 책갈피 {책id: {tab, idx, ratio, at}} — 이 기기에만 둔다
 // 화면 상단에 띄우는 버전. 배포할 때 sw.js 의 CACHE 이름, index.html 의 ?v= 와 같이 올린다.
 // (폰에서 "지금 새 버전이 맞나" 를 눈으로 확인하려고 띄운다)
-const APP_VER = 'v12';
+const APP_VER = 'v13';
 const API_BASE = 'https://book-collection-api.junyoung-cha83.workers.dev';
 const SYNC_DEBOUNCE_MS = 800;
 const IMG_MAX = 1200;   // 업로드 이미지 다운스케일 최대 변
@@ -329,7 +330,9 @@ function openBook(id) {
   applyEditability();
   document.getElementById('homeView').classList.add('hidden');
   document.getElementById('bookView').classList.remove('hidden');
-  document.querySelector('.detail-main').scrollTop = 0;
+  window.scrollTo(0, 0);
+  renderMarkFab();
+  gotoMark(id);          // 책갈피가 있으면 그 자리로 (탭도 그때 맞춰진다)
 }
 function renderDetailHeader() {
   const b = bookById(curId); if (!b) return;
@@ -352,6 +355,7 @@ function backHome() {
   selFigure = curTable = curCell = null; lastRange = savedRange = null; renderNodeBar();
   document.getElementById('bookView').classList.add('hidden');
   document.getElementById('homeView').classList.remove('hidden');
+  renderMarkFab();
   renderHome();
   try { localStorage.removeItem(LAST_KEY); } catch (e) {}
 }
@@ -469,6 +473,8 @@ function restoreLast() {
   let last; try { last = JSON.parse(localStorage.getItem(LAST_KEY) || 'null'); } catch (e) { last = null; }
   if (!last || !last.bookId || !bookById(last.bookId)) return;
   openBook(last.bookId);
+  // 책갈피가 꽂혀 있으면 그쪽이 우선이다 — openBook 이 이미 그 자리로 옮겨 놨다
+  if (markOf(last.bookId)) return;
   if (last.tab) setTab(last.tab);
   requestAnimationFrame(() => {
     window.scrollTo(0, last.scrollY || 0);
@@ -477,6 +483,89 @@ function restoreLast() {
       if (ed && ed.dataset.field === last.caret.field) { ed.focus(); setCaretOffset(ed, last.caret.off); }
     }
   });
+}
+
+// ── 책갈피 ───────────────────────────────────────────────────
+// 책마다 한 자리를 기억해 두고, 해제하기 전까지 그 책을 열 때마다 그리로 간다.
+// 자리는 픽셀이 아니라 '몇 번째 문단' 으로 저장한다 — 폰과 맥북은 화면 폭이 달라
+// 픽셀 위치를 그대로 쓰면 엉뚱한 데로 간다. (문단이 없는 글은 비율로 대신한다.)
+function marks() {
+  try { const o = JSON.parse(localStorage.getItem(MARK_KEY) || '{}'); return (o && typeof o === 'object') ? o : {}; }
+  catch (e) { return {}; }
+}
+function markOf(id) { const m = marks()[id]; return m && typeof m.idx === 'number' ? m : null; }
+function writeMark(id, m) {
+  const all = marks();
+  if (m) all[id] = m; else delete all[id];
+  try { localStorage.setItem(MARK_KEY, JSON.stringify(all)); } catch (e) {}
+}
+// 고정된 헤더·탭에 가려지는 높이 — 이 아래가 실제로 읽히는 영역이다
+function stickyTop() {
+  const t = document.getElementById('tabs');
+  const r = t ? t.getBoundingClientRect() : null;
+  return r && r.bottom > 0 ? r.bottom : 0;
+}
+// 지금 화면 맨 위에 걸려 있는 문단 번호
+function topBlockIdx(ed) {
+  if (!ed) return -1;
+  const top = stickyTop() + 4, kids = ed.children;
+  for (let i = 0; i < kids.length; i++) {
+    if (kids[i].getBoundingClientRect().bottom > top) return i;
+  }
+  return kids.length ? kids.length - 1 : -1;
+}
+function setMarkHere() {
+  if (!curId) return;
+  const ed = activeEditor();
+  const doc = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+  writeMark(curId, {
+    tab: curTab, idx: topBlockIdx(ed),
+    ratio: (window.scrollY || 0) / doc,     // 문단을 못 찾을 때 쓸 예비값
+    at: Date.now(),
+  });
+  renderMarkFab(); flashMark('책갈피를 꽂았어요');
+}
+function clearMark() {
+  if (!curId) return;
+  writeMark(curId, null);
+  renderMarkFab(); flashMark('책갈피를 뺐어요');
+}
+// 책갈피 자리로 이동. 옮겼으면 true.
+function gotoMark(id) {
+  const m = markOf(id);
+  if (!m) return false;
+  if (m.tab) setTab(m.tab);
+  // 내용이 화면에 배치된 뒤라야 위치를 잴 수 있다
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const ed = activeEditor();
+    const el = ed && m.idx >= 0 ? ed.children[m.idx] : null;
+    if (el) {
+      const y = window.scrollY + el.getBoundingClientRect().top - stickyTop() - 8;
+      window.scrollTo(0, Math.max(0, y));
+    } else if (typeof m.ratio === 'number') {
+      const doc = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
+      window.scrollTo(0, Math.max(0, Math.round(m.ratio * doc)));
+    }
+  }));
+  return true;
+}
+function renderMarkFab() {
+  const fab = document.getElementById('markFab');
+  if (!fab) return;
+  const on = !!(curId && markOf(curId));
+  fab.hidden = !curId;
+  fab.classList.toggle('on', on);
+  const set = document.getElementById('btnMarkSet');
+  const clr = document.getElementById('btnMarkClear');
+  if (set) set.textContent = on ? '🔖 여기로 옮기기' : '🔖 책갈피';
+  if (clr) clr.hidden = !on;
+}
+function flashMark(msg) {
+  const t = document.getElementById('markToast');
+  if (!t) return;
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(flashMark._t);
+  flashMark._t = setTimeout(() => t.classList.remove('show'), 1200);
 }
 function saveActiveField() {
   const ed = activeEditor(); if (!ed) return;
@@ -976,6 +1065,8 @@ document.addEventListener('DOMContentLoaded', () => {
   updateLockUI();
   document.getElementById('btnLock').onclick = promptEditToken;
   document.getElementById('btnRefresh').onclick = manualRefresh;
+  document.getElementById('btnMarkSet').onclick = setMarkHere;
+  document.getElementById('btnMarkClear').onclick = clearMark;
   document.getElementById('appVer').textContent = APP_VER;
   document.querySelectorAll('.btn-editmode').forEach(b => b.onclick = () => setEditMode(!editMode));
   setEditMode(false);          // 시작은 언제나 읽기 모드
