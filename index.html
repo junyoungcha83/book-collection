@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>도서모음</title>
-<link rel="stylesheet" href="assets/app.css?v=13" />
+<link rel="stylesheet" href="assets/app.css?v=14" />
 
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#14b8a6" />
@@ -33,7 +33,7 @@
   </main>
 </section>
 
-<!-- 상세: 5개 탭 -->
+<!-- 상세: 4개 탭 (목차·내용·원본·메모) -->
 <section id="bookView" class="hidden">
   <header class="app-header detail">
     <button class="icon-btn" id="btnBack" aria-label="뒤로">←</button>
@@ -49,7 +49,6 @@
     <button class="tab active" data-tab="toc" role="tab">목차</button>
     <button class="tab" data-tab="content" role="tab">내용</button>
     <button class="tab" data-tab="original" role="tab">원본</button>
-    <button class="tab" data-tab="summary" role="tab">내용요약</button>
     <button class="tab" data-tab="memo" role="tab">메모</button>
   </nav>
   <main class="detail-main">
@@ -77,10 +76,6 @@
         <input type="file" accept=".txt,text/plain" id="txtFile" style="display:none" />
       </div>
       <p class="img-note">붙여넣기는 <b>서식 없이 글자만</b> 들어갑니다. 그림·표는 <b>내용</b> 탭에서 넣어 주세요.</p>
-    </div>
-    <!-- 내용요약 -->
-    <div class="panel hidden" id="panelSummary">
-      <div class="edit" id="fSummary" data-field="summary" contenteditable="true" data-ph="핵심 내용을 요약해 보세요…"></div>
     </div>
     <!-- 메모 -->
     <div class="panel hidden" id="panelMemo">
@@ -193,7 +188,7 @@
 <!-- 이미지 확대 -->
 <div class="lightbox hidden" id="lightbox"><img id="lightboxImg" alt="" /></div>
 
-<script src="assets/app.js?v=13"></script>
+<script src="assets/app.js?v=14"></script>
 <script>
   // 새 버전이 올라와도 이미 떠 있는 페이지는 옛 코드를 계속 쓴다. 그래서
   //  ① 새 워커가 제어권을 잡으면 한 번 새로고침해 새 코드로 갈아탄다

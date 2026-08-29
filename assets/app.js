@@ -1,4 +1,4 @@
-// 도서모음 — 기기(localStorage) 저장 정적 앱. 책 그리드 + 5탭(목차/내용/원본/내용요약/메모).
+// 도서모음 — 기기(localStorage) 저장 정적 앱. 책 그리드 + 4탭(목차/내용/원본/메모).
 'use strict';
 const STORE = 'doso-books-v1';
 const LAST_KEY = 'doso-last';   // 마지막 읽던 위치(책/탭/스크롤/커서)
@@ -7,7 +7,7 @@ const BACKUP_KEY = 'doso-books-backup';   // 병합에서 밀려난 로컬본 �
 const MARK_KEY = 'doso-marks';            // 책갈피 {책id: {tab, idx, ratio, at}} — 이 기기에만 둔다
 // 화면 상단에 띄우는 버전. 배포할 때 sw.js 의 CACHE 이름, index.html 의 ?v= 와 같이 올린다.
 // (폰에서 "지금 새 버전이 맞나" 를 눈으로 확인하려고 띄운다)
-const APP_VER = 'v13';
+const APP_VER = 'v14';
 const API_BASE = 'https://book-collection-api.junyoung-cha83.workers.dev';
 const SYNC_DEBOUNCE_MS = 800;
 const IMG_MAX = 1200;   // 업로드 이미지 다운스케일 최대 변
@@ -42,7 +42,7 @@ function save() { stampChanges(); const ok = cacheLocal(); scheduleSync(); retur
 
 // 어떤 책이 바뀌었는지 알아야 updated_at 을 찍는다. save() 를 부르는 자리가 스무 곳이
 // 넘어서 일일이 손대는 대신, 마지막 동기화 시점의 지문과 비교해 바뀐 책만 찍는다.
-function bookSig(b) { return JSON.stringify([b.title, b.author, b.toc, b.content, b.original, b.summary, b.memo, b.images, !!b.deleted]); }
+function bookSig(b) { return JSON.stringify([b.title, b.author, b.toc, b.content, b.original, b.memo, b.images, !!b.deleted]); }
 function resetBaseline() { _baseline = {}; for (const b of state.books) _baseline[b.id] = bookSig(b); }
 function stampChanges() {
   const now = new Date().toISOString();
@@ -106,7 +106,7 @@ function migrate(d) {
     deleted: !!b.deleted,                                              // 삭제 표시(목록에선 감춘다)
     toc: String(b.toc || ''), content: String(b.content || ''),
     original: String(b.original || ''),                                // 원본(텍스트 전용)
-    summary: String(b.summary || ''), memo: String(b.memo || ''),
+    memo: String(b.memo || ''),
     images: Array.isArray(b.images) ? b.images.filter(x => typeof x === 'string') : [],
   }));
   return { version: 1, rev: Number(d && d.rev) || 0, books };
@@ -173,7 +173,7 @@ function rerenderAfterSync(changed) {
   const b = bookById(curId), y = window.scrollY || 0;
   renderDetailHeader();
   setEditorHTML('fToc', b.toc); setEditorHTML('fContent', b.content);
-  setEditorHTML('fOriginal', b.original); setEditorHTML('fSummary', b.summary);
+  setEditorHTML('fOriginal', b.original);
   setEditorHTML('fMemo', b.memo);
   renderImages(); applyEditability();
   requestAnimationFrame(() => window.scrollTo(0, y));
@@ -307,14 +307,14 @@ function saveDialog() {
   } else {
     const now = new Date().toISOString();
     state.books.unshift({ id: genId(), title, author, created_at: now, updated_at: now, deleted: false,
-      toc: '', content: '', original: '', summary: '', memo: '', images: [] });
+      toc: '', content: '', original: '', memo: '', images: [] });
   }
   save();
   document.getElementById('bookDialog').close();
   if (curId) { renderDetailHeader(); } else { renderHome(); }
 }
 
-// ── 상세: 5탭 ────────────────────────────────
+// ── 상세: 4탭 ────────────────────────────────
 function openBook(id) {
   curId = id;
   const b = bookById(id); if (!b) return;
@@ -323,7 +323,6 @@ function openBook(id) {
   setEditorHTML('fToc', b.toc);
   setEditorHTML('fContent', b.content);
   setEditorHTML('fOriginal', b.original);
-  setEditorHTML('fSummary', b.summary);
   setEditorHTML('fMemo', b.memo);
   renderImages();
   setTab('toc');
@@ -339,11 +338,14 @@ function renderDetailHeader() {
   document.getElementById('dTitle').textContent = b.title || '(제목 없음)';
   document.getElementById('dAuthor').textContent = b.author || '';
 }
+const TAB_PANEL = { toc: 'panelToc', content: 'panelContent', original: 'panelOriginal', memo: 'panelMemo' };
 function setTab(tab) {
+  // 없어진 탭이 들어오면(마지막 위치·책갈피에 남은 '내용요약') 모든 패널이 숨어
+  // 화면이 비어 버린다. 그런 값은 목차로 되돌린다.
+  if (!TAB_PANEL[tab]) tab = 'toc';
   curTab = tab;
   document.querySelectorAll('#tabs .tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
-  const map = { toc: 'panelToc', content: 'panelContent', original: 'panelOriginal', summary: 'panelSummary', memo: 'panelMemo' };
-  Object.entries(map).forEach(([k, id]) => document.getElementById(id).classList.toggle('hidden', k !== tab));
+  Object.entries(TAB_PANEL).forEach(([k, id]) => document.getElementById(id).classList.toggle('hidden', k !== tab));
   // 원본은 텍스트 전용 — 그림·표 삽입 버튼을 감춘다
   document.querySelector('#fmtScope .ins-group').classList.toggle('hidden', tab === 'original');
   selFigure = curTable = curCell = null; lastRange = null; renderNodeBar();
@@ -578,7 +580,7 @@ function saveActiveField() {
 let fmtScope = 'sel';   // 'sel' 선택영역 / 'all' 전체
 let savedRange = null;  // 편집기 안의 마지막 선택(버튼 탭으로 포커스 잃어도 복원)
 function activeEditor() {
-  for (const id of ['panelToc', 'panelContent', 'panelOriginal', 'panelSummary', 'panelMemo']) {
+  for (const id of ['panelToc', 'panelContent', 'panelOriginal', 'panelMemo']) {
     const p = document.getElementById(id);
     if (p && !p.classList.contains('hidden')) return p.querySelector('.edit');
   }
@@ -1076,7 +1078,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const b = bookById(curId); if (!b) return;
     if (!confirm(`'${b.title}'을(를) 삭제할까요? 되돌릴 수 없어요.`)) return;
     // 목록에서 빼는 대신 삭제 표시만 — 안 그러면 다른 기기와 합칠 때 되살아난다
-    b.deleted = true; b.toc = b.content = b.original = b.summary = b.memo = ''; b.images = [];
+    b.deleted = true; b.toc = b.content = b.original = b.memo = ''; b.images = [];
     save(); backHome();
   };
   document.getElementById('btnEditInfo').onclick = () => openDialog(curId);
