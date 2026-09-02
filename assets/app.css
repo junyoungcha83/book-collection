@@ -75,7 +75,9 @@ body.editing .edit{ box-shadow:inset 0 0 0 2px rgba(13,148,136,.35); border-radi
 .grid{ display:grid; grid-template-columns:repeat(3,1fr); gap:12px; }
 @media (min-width:520px){ .grid{ grid-template-columns:repeat(4,1fr); } }
 @media (min-width:760px){ .grid{ grid-template-columns:repeat(6,1fr); } }
-.tile{ aspect-ratio:3/4; border-radius:14px; border:1px solid var(--border); background:var(--card);
+/* min-width:0 이 없으면 그리드 칸이 내용(표지 사진의 원본 너비) 아래로 줄지 않아
+   칸이 화면 밖으로 밀려난다. 표지를 넣기 전에는 글자뿐이라 드러나지 않던 문제다. */
+.tile{ min-width:0; aspect-ratio:3/4; border-radius:14px; border:1px solid var(--border); background:var(--card);
   cursor:pointer; padding:10px; display:flex; flex-direction:column; align-items:center; justify-content:center;
   gap:6px; text-align:center; box-shadow:0 1px 4px rgba(15,23,42,.06); transition:transform .1s; -webkit-tap-highlight-color:transparent; }
 .tile:active{ transform:scale(.96); }
@@ -83,6 +85,11 @@ body.editing .edit{ box-shadow:inset 0 0 0 2px rgba(13,148,136,.35); border-radi
 .tile.add .plus{ font-size:2.4rem; font-weight:800; line-height:1; }
 .tile.add .add-label{ font-size:.82rem; font-weight:700; }
 .tile.book .cover{ font-size:2rem; }
+/* 표지가 있으면 타일 위쪽을 사진이 차지하고 제목·저자는 아래로 내려간다 */
+.tile.book.has-cover{ justify-content:flex-start; gap:8px; padding:8px; }
+.tile.book .cover-img{ width:100%; max-width:100%; flex:1 1 auto; min-height:0; object-fit:cover;
+  border-radius:9px; background:var(--border); display:block; }
+.tile.book.has-cover .b-title{ -webkit-line-clamp:2; }
 .tile.book .b-title{ font-size:.86rem; font-weight:800; line-height:1.25;
   display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 .tile.book .b-author{ font-size:.72rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
@@ -236,6 +243,22 @@ body:not(.readonly) .mark-fab{ bottom:calc(96px + var(--safe-bottom)); }
 .field input{ width:100%; border:1px solid var(--border); border-radius:10px; padding:11px 12px;
   font-size:1rem; font-family:inherit; outline:none; }
 .field input:focus{ border-color:var(--accent); box-shadow:0 0 0 3px rgba(45,212,191,.18); }
+/* 표지 고르기 — 빈 상태는 ＋, 고른 뒤엔 그 자리에 사진이 들어찬다 */
+.cover-pick{ display:flex; gap:12px; align-items:flex-start; }
+.cover-btn{ width:78px; height:104px; flex:0 0 auto; padding:0; cursor:pointer;
+  border:2px dashed var(--accent); border-radius:10px; background:#ecfdf5;
+  display:flex; align-items:center; justify-content:center; overflow:hidden; }
+.cover-btn:active{ transform:scale(.96); }
+.cover-plus{ font-size:1.9rem; font-weight:800; line-height:1; color:var(--mint-dark); }
+.cover-plus[hidden]{ display:none; }
+.cover-prev{ width:100%; height:100%; object-fit:cover; display:block; }
+.cover-prev[hidden]{ display:none; }
+.cover-side{ flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:8px; padding-top:2px; }
+.cover-hint{ margin:0; font-size:.78rem; color:var(--muted); line-height:1.5; }
+.cover-del{ align-self:flex-start; border:1px solid var(--border); background:var(--card);
+  color:#b91c1c; border-radius:8px; padding:6px 10px; font-size:.78rem; font-weight:700; cursor:pointer; }
+.cover-del[hidden]{ display:none; }
+
 .field-row{ display:flex; gap:10px; }
 .field-row .field{ flex:1; }
 .check{ display:flex; align-items:center; gap:8px; font-size:.88rem; font-weight:700;

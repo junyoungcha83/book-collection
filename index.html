@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>도서모음</title>
-<link rel="stylesheet" href="assets/app.css?v=14" />
+<link rel="stylesheet" href="assets/app.css?v=15" />
 
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#14b8a6" />
@@ -158,6 +158,20 @@
     <label class="field"><span>저자</span>
       <input type="text" id="fBookAuthor" autocomplete="off" placeholder="지은이" />
     </label>
+    <div class="field">
+      <span>표지</span>
+      <div class="cover-pick">
+        <button type="button" class="cover-btn" id="btnCover" aria-label="표지 사진 넣기">
+          <span class="cover-plus" id="coverPlus">＋</span>
+          <img class="cover-prev" id="coverPrev" alt="" hidden />
+        </button>
+        <div class="cover-side">
+          <p class="cover-hint" id="coverHint">＋ 를 눌러 책 표지를 넣으세요</p>
+          <button type="button" class="cover-del" id="btnCoverDel" hidden>표지 지우기</button>
+        </div>
+      </div>
+      <input type="file" accept="image/*" id="coverFile" hidden />
+    </div>
     <div class="dialog-actions">
       <button type="button" class="btn ghost" id="dialogCancel">취소</button>
       <button type="button" class="btn" id="dialogSave">저장</button>
@@ -188,7 +202,7 @@
 <!-- 이미지 확대 -->
 <div class="lightbox hidden" id="lightbox"><img id="lightboxImg" alt="" /></div>
 
-<script src="assets/app.js?v=14"></script>
+<script src="assets/app.js?v=15"></script>
 <script>
   // 새 버전이 올라와도 이미 떠 있는 페이지는 옛 코드를 계속 쓴다. 그래서
   //  ① 새 워커가 제어권을 잡으면 한 번 새로고침해 새 코드로 갈아탄다

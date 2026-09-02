@@ -7,10 +7,13 @@ const BACKUP_KEY = 'doso-books-backup';   // 병합에서 밀려난 로컬본 �
 const MARK_KEY = 'doso-marks';            // 책갈피 {책id: {tab, idx, ratio, at}} — 이 기기에만 둔다
 // 화면 상단에 띄우는 버전. 배포할 때 sw.js 의 CACHE 이름, index.html 의 ?v= 와 같이 올린다.
 // (폰에서 "지금 새 버전이 맞나" 를 눈으로 확인하려고 띄운다)
-const APP_VER = 'v14';
+const APP_VER = 'v15';
 const API_BASE = 'https://book-collection-api.junyoung-cha83.workers.dev';
 const SYNC_DEBOUNCE_MS = 800;
 const IMG_MAX = 1200;   // 업로드 이미지 다운스케일 최대 변
+// 표지는 목록 타일(작은 사각형)에만 쓰므로 크게 둘 이유가 없다. 책마다 붙어
+// 동기화 문서에 통째로 실려 나가므로, 작을수록 기기 간 전송이 가볍다.
+const COVER_MAX = 400;
 
 let state = { books: [] };
 let curId = null;        // 열려 있는 책 id
@@ -42,7 +45,7 @@ function save() { stampChanges(); const ok = cacheLocal(); scheduleSync(); retur
 
 // 어떤 책이 바뀌었는지 알아야 updated_at 을 찍는다. save() 를 부르는 자리가 스무 곳이
 // 넘어서 일일이 손대는 대신, 마지막 동기화 시점의 지문과 비교해 바뀐 책만 찍는다.
-function bookSig(b) { return JSON.stringify([b.title, b.author, b.toc, b.content, b.original, b.memo, b.images, !!b.deleted]); }
+function bookSig(b) { return JSON.stringify([b.title, b.author, b.cover, b.toc, b.content, b.original, b.memo, b.images, !!b.deleted]); }
 function resetBaseline() { _baseline = {}; for (const b of state.books) _baseline[b.id] = bookSig(b); }
 function stampChanges() {
   const now = new Date().toISOString();
@@ -106,6 +109,7 @@ function migrate(d) {
     deleted: !!b.deleted,                                              // 삭제 표시(목록에선 감춘다)
     toc: String(b.toc || ''), content: String(b.content || ''),
     original: String(b.original || ''),                                // 원본(텍스트 전용)
+    cover: String(b.cover || ''),                                   // 표지 사진(data URI)
     memo: String(b.memo || ''),
     images: Array.isArray(b.images) ? b.images.filter(x => typeof x === 'string') : [],
   }));
@@ -275,8 +279,8 @@ function renderHome() {
   const add = `<button class="tile add" id="tileAdd" aria-label="책 추가"><span class="plus">＋</span><span class="add-label">책 추가</span></button>`;
   const live = liveBooks();
   const cards = live.map(b => `
-    <button class="tile book" data-id="${b.id}">
-      <span class="cover">📖</span>
+    <button class="tile book${b.cover ? ' has-cover' : ''}" data-id="${b.id}">
+      ${b.cover ? `<img class="cover-img" src="${esc(b.cover)}" alt="" loading="lazy" />` : '<span class="cover">📖</span>'}
       <span class="b-title">${esc(b.title || '(제목 없음)')}</span>
       <span class="b-author">${esc(b.author || '')}</span>
     </button>`).join('');
@@ -289,12 +293,27 @@ function renderHome() {
 }
 
 // ── 책 추가/수정 다이얼로그 ──────────────────
+// 표지는 다이얼로그를 저장할 때만 책에 들어간다. 여기 담아 뒀다가 '저장' 에서 옮긴다
+// — 사진을 고르고 '취소' 를 눌렀는데 표지가 바뀌어 있으면 안 되기 때문이다.
+let dlgCover = '';
+function renderCoverPick() {
+  const prev = document.getElementById('coverPrev');
+  const plus = document.getElementById('coverPlus');
+  const del = document.getElementById('btnCoverDel');
+  const hint = document.getElementById('coverHint');
+  const has = !!dlgCover;
+  prev.hidden = !has; plus.hidden = has; del.hidden = !has;
+  if (has) prev.src = dlgCover; else prev.removeAttribute('src');
+  hint.textContent = has ? '목록에서 이 사진이 표지로 보입니다.' : '＋ 를 눌러 책 표지를 넣으세요';
+}
 function openDialog(id) {
   editId = id;
   const b = id ? bookById(id) : null;
   document.getElementById('dialogTitle').textContent = id ? '책 정보 수정' : '책 추가';
   document.getElementById('fBookTitle').value = b ? (b.title || '') : '';
   document.getElementById('fBookAuthor').value = b ? (b.author || '') : '';
+  dlgCover = b ? (b.cover || '') : '';
+  renderCoverPick();
   document.getElementById('bookDialog').showModal();
   setTimeout(() => document.getElementById('fBookTitle').focus(), 50);
 }
@@ -303,13 +322,13 @@ function saveDialog() {
   const author = document.getElementById('fBookAuthor').value.trim();
   if (!title) { document.getElementById('fBookTitle').focus(); return; }
   if (editId) {
-    const b = bookById(editId); if (b) { b.title = title; b.author = author; }
+    const b = bookById(editId); if (b) { b.title = title; b.author = author; b.cover = dlgCover; }
   } else {
     const now = new Date().toISOString();
     state.books.unshift({ id: genId(), title, author, created_at: now, updated_at: now, deleted: false,
-      toc: '', content: '', original: '', memo: '', images: [] });
+      cover: dlgCover, toc: '', content: '', original: '', memo: '', images: [] });
   }
-  save();
+  if (!save()) alert('저장 공간이 부족해요. 표지 사진을 빼거나 그림 수를 줄여 주세요.');
   document.getElementById('bookDialog').close();
   if (curId) { renderDetailHeader(); } else { renderHome(); }
 }
@@ -858,13 +877,13 @@ function addImageFiles(fileEl) {
   };
   next();
 }
-function downscale(file, cb) {
+function downscale(file, cb, max) {
   const url = URL.createObjectURL(file);
   const img = new Image();
   img.onload = () => {
     URL.revokeObjectURL(url);
     let w = img.naturalWidth, h = img.naturalHeight;
-    const s = Math.min(1, IMG_MAX / Math.max(w, h));
+    const s = Math.min(1, (max || IMG_MAX) / Math.max(w, h));
     w = Math.max(1, Math.round(w * s)); h = Math.max(1, Math.round(h * s));
     const c = document.createElement('canvas'); c.width = w; c.height = h;
     c.getContext('2d').drawImage(img, 0, 0, w, h);
@@ -1069,6 +1088,20 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btnRefresh').onclick = manualRefresh;
   document.getElementById('btnMarkSet').onclick = setMarkHere;
   document.getElementById('btnMarkClear').onclick = clearMark;
+
+  // 표지 사진 — 목록 타일에 쓰는 작은 그림이라 본문 삽화(1200px)보다 작게 줄인다
+  const coverFile = document.getElementById('coverFile');
+  document.getElementById('btnCover').onclick = () => coverFile.click();
+  document.getElementById('btnCoverDel').onclick = () => { dlgCover = ''; renderCoverPick(); };
+  coverFile.onchange = () => {
+    const f = coverFile.files && coverFile.files[0];
+    coverFile.value = '';                      // 같은 파일을 다시 골라도 이벤트가 오게
+    if (!f) return;
+    downscale(f, durl => {
+      if (!durl) { alert('사진을 읽지 못했어요. 다른 사진으로 해 보세요.'); return; }
+      dlgCover = durl; renderCoverPick();
+    }, COVER_MAX);
+  };
   document.getElementById('appVer').textContent = APP_VER;
   document.querySelectorAll('.btn-editmode').forEach(b => b.onclick = () => setEditMode(!editMode));
   setEditMode(false);          // 시작은 언제나 읽기 모드
@@ -1078,7 +1111,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const b = bookById(curId); if (!b) return;
     if (!confirm(`'${b.title}'을(를) 삭제할까요? 되돌릴 수 없어요.`)) return;
     // 목록에서 빼는 대신 삭제 표시만 — 안 그러면 다른 기기와 합칠 때 되살아난다
-    b.deleted = true; b.toc = b.content = b.original = b.memo = ''; b.images = [];
+    b.deleted = true; b.toc = b.content = b.original = b.memo = b.cover = ''; b.images = [];
     save(); backHome();
   };
   document.getElementById('btnEditInfo').onclick = () => openDialog(curId);
