@@ -7,7 +7,7 @@ const BACKUP_KEY = 'doso-books-backup';   // 병합에서 밀려난 로컬본 �
 const MARK_KEY = 'doso-marks';            // 책갈피 {책id: {tab, idx, ratio, at}} — 이 기기에만 둔다
 // 화면 상단에 띄우는 버전. 배포할 때 sw.js 의 CACHE 이름, index.html 의 ?v= 와 같이 올린다.
 // (폰에서 "지금 새 버전이 맞나" 를 눈으로 확인하려고 띄운다)
-const APP_VER = 'v15';
+const APP_VER = 'v16';
 const API_BASE = 'https://book-collection-api.junyoung-cha83.workers.dev';
 const SYNC_DEBOUNCE_MS = 800;
 const IMG_MAX = 1200;   // 업로드 이미지 다운스케일 최대 변
@@ -278,18 +278,37 @@ function renderHome() {
   const grid = document.getElementById('grid');
   const add = `<button class="tile add" id="tileAdd" aria-label="책 추가"><span class="plus">＋</span><span class="add-label">책 추가</span></button>`;
   const live = liveBooks();
+  // 표지 ＋ 는 책 칸 안에 들어가므로 칸 자체를 button 으로 두면 버튼 안에 버튼이 된다.
+  // 그래서 div + role=button 으로 두고 키보드 조작을 직접 붙인다.
   const cards = live.map(b => `
-    <button class="tile book${b.cover ? ' has-cover' : ''}" data-id="${b.id}">
+    <div class="tile book${b.cover ? ' has-cover' : ''}" data-id="${b.id}" role="button" tabindex="0">
       ${b.cover ? `<img class="cover-img" src="${esc(b.cover)}" alt="" loading="lazy" />` : '<span class="cover">📖</span>'}
       <span class="b-title">${esc(b.title || '(제목 없음)')}</span>
       <span class="b-author">${esc(b.author || '')}</span>
-    </button>`).join('');
+      <button type="button" class="tile-cover" data-cover="${b.id}"
+              title="${b.cover ? '표지 바꾸기' : '표지 넣기'}"
+              aria-label="${esc(b.title || '이 책')} 표지 ${b.cover ? '바꾸기' : '넣기'}">＋</button>
+    </div>`).join('');
   const emptyHint = (!live.length && !hasEditRight())
     ? `<div class="ro-hint">🔒 읽기전용입니다.<br>오른쪽 위 자물쇠를 눌러 비밀번호를 입력하면 편집할 수 있어요.</div>` : '';
   grid.innerHTML = add + cards + emptyHint;
   document.getElementById('bookCount').textContent = live.length ? `${live.length}권` : '';
   const ta = document.getElementById('tileAdd'); if (ta) ta.onclick = () => openDialog(null);
-  grid.querySelectorAll('.tile.book').forEach(t => t.onclick = () => openBook(t.dataset.id));
+  grid.querySelectorAll('.tile.book').forEach(t => {
+    t.onclick = () => openBook(t.dataset.id);
+    t.onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openBook(t.dataset.id); } };
+  });
+  // 표지 ＋ — 책을 열지 않고 목록에서 바로 사진을 고른다
+  grid.querySelectorAll('.tile-cover').forEach(btn => {
+    btn.onclick = e => { e.stopPropagation(); pickCoverFor(btn.dataset.cover); };
+  });
+}
+
+// 목록에서 표지를 바로 갈아끼운다. 다이얼로그를 거치지 않으므로 고르는 즉시 저장된다.
+let coverTargetId = null;
+function pickCoverFor(id) {
+  coverTargetId = id;
+  document.getElementById('tileCoverFile').click();
 }
 
 // ── 책 추가/수정 다이얼로그 ──────────────────
@@ -1088,6 +1107,22 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btnRefresh').onclick = manualRefresh;
   document.getElementById('btnMarkSet').onclick = setMarkHere;
   document.getElementById('btnMarkClear').onclick = clearMark;
+
+  // 목록에서 누른 ＋ — 고르는 즉시 그 책에 표지가 들어간다
+  const tileCover = document.getElementById('tileCoverFile');
+  tileCover.onchange = () => {
+    const f = tileCover.files && tileCover.files[0];
+    tileCover.value = '';
+    const b = coverTargetId && bookById(coverTargetId);
+    coverTargetId = null;
+    if (!f || !b) return;
+    downscale(f, durl => {
+      if (!durl) { alert('사진을 읽지 못했어요. 다른 사진으로 해 보세요.'); return; }
+      b.cover = durl;
+      if (!save()) { alert('저장 공간이 부족해요. 표지를 빼거나 그림 수를 줄여 주세요.'); return; }
+      renderHome(); flashSaved();
+    }, COVER_MAX);
+  };
 
   // 표지 사진 — 목록 타일에 쓰는 작은 그림이라 본문 삽화(1200px)보다 작게 줄인다
   const coverFile = document.getElementById('coverFile');

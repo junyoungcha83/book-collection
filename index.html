@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>도서모음</title>
-<link rel="stylesheet" href="assets/app.css?v=15" />
+<link rel="stylesheet" href="assets/app.css?v=16" />
 
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#14b8a6" />
@@ -31,6 +31,7 @@
   <main class="home-main">
     <div class="grid" id="grid"></div>
   </main>
+  <input type="file" accept="image/*" id="tileCoverFile" hidden />
 </section>
 
 <!-- 상세: 4개 탭 (목차·내용·원본·메모) -->
@@ -202,7 +203,7 @@
 <!-- 이미지 확대 -->
 <div class="lightbox hidden" id="lightbox"><img id="lightboxImg" alt="" /></div>
 
-<script src="assets/app.js?v=15"></script>
+<script src="assets/app.js?v=16"></script>
 <script>
   // 새 버전이 올라와도 이미 떠 있는 페이지는 옛 코드를 계속 쓴다. 그래서
   //  ① 새 워커가 제어권을 잡으면 한 번 새로고침해 새 코드로 갈아탄다

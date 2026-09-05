@@ -77,7 +77,7 @@ body.editing .edit{ box-shadow:inset 0 0 0 2px rgba(13,148,136,.35); border-radi
 @media (min-width:760px){ .grid{ grid-template-columns:repeat(6,1fr); } }
 /* min-width:0 이 없으면 그리드 칸이 내용(표지 사진의 원본 너비) 아래로 줄지 않아
    칸이 화면 밖으로 밀려난다. 표지를 넣기 전에는 글자뿐이라 드러나지 않던 문제다. */
-.tile{ min-width:0; aspect-ratio:3/4; border-radius:14px; border:1px solid var(--border); background:var(--card);
+.tile{ position:relative; min-width:0; aspect-ratio:3/4; border-radius:14px; border:1px solid var(--border); background:var(--card);
   cursor:pointer; padding:10px; display:flex; flex-direction:column; align-items:center; justify-content:center;
   gap:6px; text-align:center; box-shadow:0 1px 4px rgba(15,23,42,.06); transition:transform .1s; -webkit-tap-highlight-color:transparent; }
 .tile:active{ transform:scale(.96); }
@@ -90,6 +90,16 @@ body.editing .edit{ box-shadow:inset 0 0 0 2px rgba(13,148,136,.35); border-radi
 .tile.book .cover-img{ width:100%; max-width:100%; flex:1 1 auto; min-height:0; object-fit:cover;
   border-radius:9px; background:var(--border); display:block; }
 .tile.book.has-cover .b-title{ -webkit-line-clamp:2; }
+/* 표지 넣기 ＋ — 책 칸 오른쪽 아래. 편집 모드에서만 나온다(읽는 중엔 거슬리지 않게) */
+.tile-cover{ display:none; }
+body:not(.readonly) .tile-cover{
+  display:flex; position:absolute; right:6px; bottom:6px; width:30px; height:30px;
+  align-items:center; justify-content:center; padding:0; z-index:2;
+  border:2px solid var(--card); border-radius:50%; background:var(--mint-dark); color:#fff;
+  font-size:.95rem; font-weight:800; line-height:1; cursor:pointer;
+  box-shadow:0 2px 6px rgba(15,23,42,.3); }
+.tile-cover:active{ transform:scale(.88); }
+.tile.book:focus-visible, .tile-cover:focus-visible{ outline:3px solid var(--accent); outline-offset:2px; }
 .tile.book .b-title{ font-size:.86rem; font-weight:800; line-height:1.25;
   display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
 .tile.book .b-author{ font-size:.72rem; color:var(--muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
