@@ -280,3 +280,33 @@ body:not(.readonly) .mark-fab{ bottom:calc(96px + var(--safe-bottom)); }
 .lightbox{ position:fixed; inset:0; z-index:50; background:rgba(2,6,23,.85);
   display:flex; align-items:center; justify-content:center; padding:20px; cursor:zoom-out; }
 .lightbox img{ max-width:100%; max-height:100%; border-radius:8px; }
+
+/* ══ 읽은책 표 ═══════════════════════════════════════════════
+   손으로 적는 독서 기록. 칸이 일곱이라 폰 너비에 다 안 들어간다 —
+   표만 가로로 밀어 보게 하고(.table-wrap), 페이지 자체는 가로로 흐르지 않게 한다. */
+.reads-bar{ display:flex; align-items:center; gap:10px; margin-bottom:10px; }
+.reads-count{ font-size:.85rem; font-weight:800; color:var(--mint-dark); }
+body.readonly .reads-bar{ display:none; }
+
+.table-wrap{ overflow-x:auto; -webkit-overflow-scrolling:touch;
+  border:1px solid var(--border); border-radius:14px; background:var(--card); }
+table.reads{ width:100%; border-collapse:collapse; font-size:.85rem; white-space:nowrap; }
+table.reads th, table.reads td{ padding:9px 10px; border-bottom:1px solid var(--border); text-align:left; }
+table.reads thead th{ position:sticky; top:0; z-index:1; background:#ecfdf5; color:var(--mint-dark);
+  font-weight:800; font-size:.78rem; }
+table.reads tbody tr:last-child td{ border-bottom:none; }
+table.reads tbody tr:nth-child(even){ background:#f8fffe; }
+table.reads .c-no{ width:1%; text-align:right; color:var(--muted); font-variant-numeric:tabular-nums; }
+table.reads .c-date{ width:1%; color:var(--muted); font-variant-numeric:tabular-nums; }
+/* 제목만 길어질 수 있다 — 나머지 칸을 밀어내지 않게 한계를 둔다 */
+table.reads .c-title{ font-weight:700; max-width:42vw; overflow:hidden; text-overflow:ellipsis; }
+table.reads .c-act{ width:1%; text-align:right; }
+body.readonly table.reads .c-act{ display:none; }
+.read-edit{ border:none; background:transparent; font-size:1rem; line-height:1; padding:2px 4px; cursor:pointer; }
+.read-edit:active{ opacity:.5; }
+table.reads tr.reads-none td{ white-space:normal; text-align:center; color:var(--muted);
+  padding:28px 16px; line-height:1.6; }
+.reads-hint{ margin:10px 2px 0; font-size:.78rem; color:var(--muted); line-height:1.6; }
+
+/* 다이얼로그의 '삭제' — 되돌릴 수 없는 단추라 색으로 갈라 둔다 */
+.btn.danger{ background:#fee2e2; border-color:#fca5a5; color:#b91c1c; margin-right:auto; }

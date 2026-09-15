@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>도서모음</title>
-<link rel="stylesheet" href="assets/app.css?v=16" />
+<link rel="stylesheet" href="assets/app.css?v=17" />
 
 <link rel="manifest" href="manifest.webmanifest" />
 <meta name="theme-color" content="#14b8a6" />
@@ -16,7 +16,7 @@
 </head>
 <body>
 
-<!-- 홈: 책 그리드 -->
+<!-- 홈: 책장(그리드) · 읽은책(표) 두 탭 -->
 <section id="homeView">
   <header class="app-header">
     <img class="app-logo" src="assets/icon.svg" alt="" />
@@ -28,8 +28,40 @@
     <button class="icon-btn" id="btnRefresh" title="새로고침 — 다른 기기에서 고친 내용 받아오기" aria-label="새로고침">🔄</button>
     <button class="icon-btn" id="btnLock" title="동기화 잠금/해제" aria-label="편집 잠금">🔒</button>
   </header>
+  <nav class="tabs" id="homeTabs" role="tablist">
+    <button class="tab active" data-home="shelf" role="tab" aria-selected="true">📚 책장</button>
+    <button class="tab" data-home="reads" role="tab" aria-selected="false">✅ 읽은책</button>
+  </nav>
   <main class="home-main">
-    <div class="grid" id="grid"></div>
+    <!-- 책장: 지금까지 쓰던 책 그리드 그대로 -->
+    <div class="panel" id="panelShelf">
+      <div class="grid" id="grid"></div>
+    </div>
+    <!-- 읽은책: 손으로 적는 독서 기록표 -->
+    <div class="panel hidden" id="panelReads">
+      <div class="reads-bar">
+        <button class="btn small" id="btnAddRead" type="button">＋ 읽은 책 추가</button>
+        <span class="reads-count" id="readsCount"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="reads">
+          <thead>
+            <tr>
+              <th class="c-no">순번</th>
+              <th class="c-date">읽은날짜</th>
+              <th class="c-title">제목</th>
+              <th class="c-author">지은이</th>
+              <th class="c-pub">출판사</th>
+              <th class="c-date">초판</th>
+              <th class="c-date">개정판</th>
+              <th class="c-act" aria-label="고치기"></th>
+            </tr>
+          </thead>
+          <tbody id="readsBody"></tbody>
+        </table>
+      </div>
+      <p class="reads-hint" id="readsHint"></p>
+    </div>
   </main>
   <input type="file" accept="image/*" id="tileCoverFile" hidden />
 </section>
@@ -180,6 +212,38 @@
   </form>
 </dialog>
 
+<!-- 읽은책 한 줄 추가/수정 모달 -->
+<dialog id="readDialog" class="dialog">
+  <form method="dialog">
+    <h2 id="readDialogTitle">읽은 책 추가</h2>
+    <label class="field"><span>읽은날짜</span>
+      <input type="date" id="fReadDate" />
+    </label>
+    <label class="field"><span>제목</span>
+      <input type="text" id="fReadTitle" autocomplete="off" placeholder="책 제목" required />
+    </label>
+    <label class="field"><span>지은이</span>
+      <input type="text" id="fReadAuthor" autocomplete="off" placeholder="지은이" />
+    </label>
+    <label class="field"><span>출판사</span>
+      <input type="text" id="fReadPub" autocomplete="off" placeholder="출판사" />
+    </label>
+    <div class="field-row">
+      <label class="field"><span>초판(날짜)</span>
+        <input type="date" id="fReadFirst" />
+      </label>
+      <label class="field"><span>개정판(날짜)</span>
+        <input type="date" id="fReadRev" />
+      </label>
+    </div>
+    <div class="dialog-actions">
+      <button type="button" class="btn danger" id="readDelete" hidden>삭제</button>
+      <button type="button" class="btn ghost" id="readCancel">취소</button>
+      <button type="button" class="btn" id="readSave">저장</button>
+    </div>
+  </form>
+</dialog>
+
 <!-- 표 삽입 모달 -->
 <dialog id="tableDialog" class="dialog">
   <form method="dialog">
@@ -203,7 +267,7 @@
 <!-- 이미지 확대 -->
 <div class="lightbox hidden" id="lightbox"><img id="lightboxImg" alt="" /></div>
 
-<script src="assets/app.js?v=16"></script>
+<script src="assets/app.js?v=17"></script>
 <script>
   // 새 버전이 올라와도 이미 떠 있는 페이지는 옛 코드를 계속 쓴다. 그래서
   //  ① 새 워커가 제어권을 잡으면 한 번 새로고침해 새 코드로 갈아탄다

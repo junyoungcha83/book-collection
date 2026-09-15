@@ -7,7 +7,7 @@ const BACKUP_KEY = 'doso-books-backup';   // 병합에서 밀려난 로컬본 �
 const MARK_KEY = 'doso-marks';            // 책갈피 {책id: {tab, idx, ratio, at}} — 이 기기에만 둔다
 // 화면 상단에 띄우는 버전. 배포할 때 sw.js 의 CACHE 이름, index.html 의 ?v= 와 같이 올린다.
 // (폰에서 "지금 새 버전이 맞나" 를 눈으로 확인하려고 띄운다)
-const APP_VER = 'v16';
+const APP_VER = 'v17';
 const API_BASE = 'https://book-collection-api.junyoung-cha83.workers.dev';
 const SYNC_DEBOUNCE_MS = 800;
 const IMG_MAX = 1200;   // 업로드 이미지 다운스케일 최대 변
@@ -15,7 +15,7 @@ const IMG_MAX = 1200;   // 업로드 이미지 다운스케일 최대 변
 // 동기화 문서에 통째로 실려 나가므로, 작을수록 기기 간 전송이 가볍다.
 const COVER_MAX = 400;
 
-let state = { books: [] };
+let state = { books: [], reads: [] };
 let curId = null;        // 열려 있는 책 id
 let curTab = 'toc';      // 현재 탭
 let editId = null;       // 다이얼로그 수정 대상(없으면 추가)
@@ -46,12 +46,15 @@ function save() { stampChanges(); const ok = cacheLocal(); scheduleSync(); retur
 // 어떤 책이 바뀌었는지 알아야 updated_at 을 찍는다. save() 를 부르는 자리가 스무 곳이
 // 넘어서 일일이 손대는 대신, 마지막 동기화 시점의 지문과 비교해 바뀐 책만 찍는다.
 function bookSig(b) { return JSON.stringify([b.title, b.author, b.cover, b.toc, b.content, b.original, b.memo, b.images, !!b.deleted]); }
-function resetBaseline() { _baseline = {}; for (const b of state.books) _baseline[b.id] = bookSig(b); }
+function readSig(r) { return JSON.stringify([r.date, r.title, r.author, r.publisher, r.first, r.revised, !!r.deleted]); }
+// 책과 읽은책 줄은 id 가 서로 겹치지 않으므로(b_… / r_…) 지문표 하나를 같이 쓴다
+function allRows() { return [...state.books.map(b => [b, bookSig]), ...reads().map(r => [r, readSig])]; }
+function resetBaseline() { _baseline = {}; for (const [o, sig] of allRows()) _baseline[o.id] = sig(o); }
 function stampChanges() {
   const now = new Date().toISOString();
-  for (const b of state.books) {
-    const sig = bookSig(b);
-    if (_baseline[b.id] !== sig) { b.updated_at = now; _baseline[b.id] = sig; }
+  for (const [o, sig] of allRows()) {
+    const s = sig(o);
+    if (_baseline[o.id] !== s) { o.updated_at = now; _baseline[o.id] = s; }
   }
 }
 
@@ -113,27 +116,50 @@ function migrate(d) {
     memo: String(b.memo || ''),
     images: Array.isArray(b.images) ? b.images.filter(x => typeof x === 'string') : [],
   }));
-  return { version: 1, rev: Number(d && d.rev) || 0, books };
+  // 읽은책 — 책장과 따로 손으로 적는 독서 기록. 책장의 책과 묶지 않은 것은,
+  // 읽기만 하고 목차·내용을 적지 않는 책이 훨씬 많기 때문이다.
+  const reads = (d && Array.isArray(d.reads) ? d.reads : []).map(r => ({
+    id: r.id || genReadId(),
+    date: String(r.date || ''),            // 읽은날짜 (YYYY-MM-DD)
+    title: String(r.title || ''), author: String(r.author || ''),
+    publisher: String(r.publisher || ''),
+    first: String(r.first || ''),          // 초판
+    revised: String(r.revised || ''),      // 개정판
+    created_at: r.created_at || new Date().toISOString(),
+    updated_at: r.updated_at || r.created_at || new Date(0).toISOString(),
+    deleted: !!r.deleted,
+  }));
+  return { version: 1, rev: Number(d && d.rev) || 0, books, reads };
 }
 
 // 로컬과 서버를 책 단위로 합친다. 같은 책은 updated_at 이 나중인 쪽을 택한다.
 // 밀려난 로컬본 중 '아직 서버에 못 올린 수정' 이 있으면 losers 에 담아 따로 보관한다.
 function mergeDocs(local, remote, losers) {
-  const byId = new Map(local.books.map(b => [b.id, b]));
-  for (const r of remote.books) {
-    const l = byId.get(r.id);
-    if (!l) { byId.set(r.id, r); continue; }
-    if ((Date.parse(r.updated_at) || 0) > (Date.parse(l.updated_at) || 0)) {
-      if (losers && _baseline[l.id] !== undefined && _baseline[l.id] !== bookSig(l)) losers.push(l);
-      byId.set(r.id, r);
+  // 책 목록과 읽은책 목록은 합치는 규칙이 같다 — 같은 id 는 updated_at 이 나중인 쪽,
+  // 새로 만든 것은 앞으로, 나머지는 서버 순서.
+  const mergeList = (ls, rs, sig, keepLosers) => {
+    const byId = new Map(ls.map(o => [o.id, o]));
+    for (const r of rs) {
+      const l = byId.get(r.id);
+      if (!l) { byId.set(r.id, r); continue; }
+      if ((Date.parse(r.updated_at) || 0) > (Date.parse(l.updated_at) || 0)) {
+        if (keepLosers && losers && _baseline[l.id] !== undefined && _baseline[l.id] !== sig(l)) losers.push(l);
+        byId.set(r.id, r);
+      }
     }
-  }
-  // 새로 만든 책은 앞으로(홈에서 맨 앞에 보이게), 나머지는 서버 순서를 따른다
-  const remoteIds = new Set(remote.books.map(b => b.id));
-  const order = [...local.books.filter(b => !remoteIds.has(b.id)).map(b => b.id), ...remote.books.map(b => b.id)];
-  const seen = new Set(), books = [];
-  for (const id of order) { if (seen.has(id)) continue; seen.add(id); books.push(byId.get(id)); }
-  return { version: 1, rev: remote.rev | 0, books };
+    const remoteIds = new Set(rs.map(o => o.id));
+    const order = [...ls.filter(o => !remoteIds.has(o.id)).map(o => o.id), ...rs.map(o => o.id)];
+    const seen = new Set(), out = [];
+    for (const id of order) { if (seen.has(id)) continue; seen.add(id); out.push(byId.get(id)); }
+    return out;
+  };
+  return {
+    version: 1, rev: remote.rev | 0,
+    books: mergeList(local.books, remote.books, bookSig, true),
+    // 읽은책 줄은 한 줄이 짧아 통째로 다시 적으면 그만이다. 밀려난 쪽을 따로
+    // 보관하고 경고창을 띄우면 성가시기만 하므로 losers 에 넣지 않는다.
+    reads: mergeList(local.reads || [], remote.reads || [], readSig, false),
+  };
 }
 
 // 밀려난 로컬본 보관 — 같은 책을 양쪽에서 고친 경우에만 생긴다.
@@ -159,12 +185,14 @@ async function fetchFromServer() {
 
 // 서버 문서를 로컬에 합쳐 넣고, 내용이 바뀐 책 id 들을 돌려준다.
 function adoptMerge(remoteDoc) {
-  const before = new Map(state.books.map(b => [b.id, bookSig(b)]));
+  // 읽은책 줄까지 함께 본다. 책은 그대로고 읽은책만 바뀐 경우에도 화면을 다시 그려야
+  // 해서다 — 부르는 쪽이 '바뀐 게 있나(size)' 로만 판단하기 때문이다.
+  const before = new Map(allRows().map(([o, sig]) => [o.id, sig(o)]));
   const losers = [];
   state = mergeDocs(state, migrate(remoteDoc), losers);
   cacheLocal(); resetBaseline(); stashLosers(losers);
   const changed = new Set();
-  for (const b of state.books) if (before.get(b.id) !== bookSig(b)) changed.add(b.id);
+  for (const [o, sig] of allRows()) if (before.get(o.id) !== sig(o)) changed.add(o.id);
   return changed;
 }
 
@@ -267,10 +295,17 @@ function flashSaved() {
   flashSaved._t = setTimeout(() => h.classList.remove('show'), 900);
 }
 function genId() { return 'b_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+function genReadId() { return 'r_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function esc(s) { return String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
 // 지운 책은 목록에서 빼지 않고 표시만 남기므로(다른 기기에서 되살아나지 않게)
 // 화면에 쓰는 곳에서는 항상 걸러 낸다.
 function liveBooks() { return state.books.filter(b => !b.deleted); }
+function reads() { return Array.isArray(state.reads) ? state.reads : (state.reads = []); }
+// 읽은 차례대로 보여 준다 — 순번이 '몇 번째로 읽은 책' 이 되게. 날짜가 빈 줄은 맨 뒤로.
+function liveReads() {
+  return reads().filter(r => !r.deleted)
+    .sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999') || (a.created_at || '').localeCompare(b.created_at || ''));
+}
 function bookById(id) { const b = state.books.find(x => x.id === id); return b && !b.deleted ? b : undefined; }
 
 // ── 홈: 그리드 ───────────────────────────────
@@ -302,6 +337,97 @@ function renderHome() {
   grid.querySelectorAll('.tile-cover').forEach(btn => {
     btn.onclick = e => { e.stopPropagation(); pickCoverFor(btn.dataset.cover); };
   });
+  renderReads();   // 저장·동기화 뒤 갱신 지점을 한 군데로 모은다
+}
+
+// ── 홈 탭: 책장 / 읽은책 ─────────────────────
+let homeTab = 'shelf';
+function setHomeTab(which) {
+  homeTab = (which === 'reads') ? 'reads' : 'shelf';
+  document.getElementById('panelShelf').classList.toggle('hidden', homeTab !== 'shelf');
+  document.getElementById('panelReads').classList.toggle('hidden', homeTab !== 'reads');
+  document.querySelectorAll('#homeTabs .tab').forEach(t => {
+    const on = t.dataset.home === homeTab;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  if (homeTab === 'reads') renderReads();
+  window.scrollTo(0, 0);
+}
+
+// ── 읽은책 표 ────────────────────────────────
+// 손으로 적는 독서 기록. 순번은 저장하지 않고 읽은 차례대로 그때그때 매긴다 —
+// 나중에 예전에 읽은 책을 끼워 넣어도 번호가 저절로 맞는다.
+function fmtDate(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ''));
+  return m ? `${m[1]}.${m[2]}.${m[3]}` : (s || '');
+}
+function renderReads() {
+  const body = document.getElementById('readsBody'); if (!body) return;
+  const list = liveReads();
+  body.innerHTML = list.length ? list.map((r, i) => `
+    <tr data-id="${r.id}">
+      <td class="c-no">${i + 1}</td>
+      <td class="c-date">${esc(fmtDate(r.date))}</td>
+      <td class="c-title">${esc(r.title || '(제목 없음)')}</td>
+      <td class="c-author">${esc(r.author || '')}</td>
+      <td class="c-pub">${esc(r.publisher || '')}</td>
+      <td class="c-date">${esc(fmtDate(r.first))}</td>
+      <td class="c-date">${esc(fmtDate(r.revised))}</td>
+      <td class="c-act"><button type="button" class="read-edit" data-edit="${r.id}" aria-label="고치기">✏️</button></td>
+    </tr>`).join('')
+    : `<tr class="reads-none"><td colspan="8">${hasEditRight()
+        ? '아직 적어 둔 책이 없어요. 위 <b>＋ 읽은 책 추가</b> 를 눌러 보세요.'
+        : '🔒 읽기전용입니다. 오른쪽 위 자물쇠를 눌러 비밀번호를 넣으면 적을 수 있어요.'}</td></tr>`;
+  document.getElementById('readsCount').textContent = list.length ? `${list.length}권` : '';
+  const hint = document.getElementById('readsHint');
+  if (hint) hint.textContent = list.length ? '순번은 읽은날짜 차례로 저절로 매겨집니다. 줄 끝 ✏️ 로 고치거나 지울 수 있어요.' : '';
+  body.querySelectorAll('.read-edit').forEach(b => b.onclick = () => openReadDialog(b.dataset.edit));
+}
+
+let readEditId = null;
+function readById(id) { return reads().find(r => r.id === id && !r.deleted); }
+function openReadDialog(id) {
+  if (!canEdit()) { alert('먼저 📝 편집 을 눌러 주세요.'); return; }
+  readEditId = id || null;
+  const r = id ? readById(id) : null;
+  document.getElementById('readDialogTitle').textContent = r ? '읽은 책 수정' : '읽은 책 추가';
+  document.getElementById('fReadDate').value = (r && r.date) || todayStr();
+  document.getElementById('fReadTitle').value = (r && r.title) || '';
+  document.getElementById('fReadAuthor').value = (r && r.author) || '';
+  document.getElementById('fReadPub').value = (r && r.publisher) || '';
+  document.getElementById('fReadFirst').value = (r && r.first) || '';
+  document.getElementById('fReadRev').value = (r && r.revised) || '';
+  document.getElementById('readDelete').hidden = !r;
+  document.getElementById('readDialog').showModal();
+  setTimeout(() => document.getElementById('fReadTitle').focus(), 0);
+}
+function todayStr() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function saveReadDialog() {
+  const title = document.getElementById('fReadTitle').value.trim();
+  if (!title) { alert('제목을 넣어 주세요.'); document.getElementById('fReadTitle').focus(); return; }
+  const v = id => document.getElementById(id).value.trim();
+  let r = readEditId && readById(readEditId);
+  if (!r) { r = { id: genReadId(), created_at: new Date().toISOString(), deleted: false }; reads().push(r); }
+  r.date = v('fReadDate'); r.title = title; r.author = v('fReadAuthor');
+  r.publisher = v('fReadPub'); r.first = v('fReadFirst'); r.revised = v('fReadRev');
+  if (!save()) { alert('저장 공간이 부족해요.'); return; }
+  document.getElementById('readDialog').close();
+  readEditId = null;
+  renderReads(); flashSaved();
+}
+function deleteRead() {
+  const r = readEditId && readById(readEditId); if (!r) return;
+  if (!confirm(`'${r.title || '(제목 없음)'}'을(를) 목록에서 지울까요?`)) return;
+  // 책과 마찬가지로 목록에서 빼지 않고 표시만 남긴다 — 안 그러면 다른 기기에서 되살아난다
+  r.deleted = true; r.title = r.author = r.publisher = r.date = r.first = r.revised = '';
+  save();
+  document.getElementById('readDialog').close();
+  readEditId = null;
+  renderReads(); flashSaved();
 }
 
 // 목록에서 표지를 바로 갈아끼운다. 다이얼로그를 거치지 않으므로 고르는 즉시 저장된다.
@@ -1104,6 +1230,12 @@ document.addEventListener('DOMContentLoaded', () => {
   renderHome();
   updateLockUI();
   document.getElementById('btnLock').onclick = promptEditToken;
+  // 홈 탭(책장·읽은책) + 읽은책 다이얼로그
+  document.querySelectorAll('#homeTabs .tab').forEach(t => t.onclick = () => setHomeTab(t.dataset.home));
+  document.getElementById('btnAddRead').onclick = () => openReadDialog(null);
+  document.getElementById('readSave').onclick = saveReadDialog;
+  document.getElementById('readDelete').onclick = deleteRead;
+  document.getElementById('readCancel').onclick = () => { document.getElementById('readDialog').close(); readEditId = null; };
   document.getElementById('btnRefresh').onclick = manualRefresh;
   document.getElementById('btnMarkSet').onclick = setMarkHere;
   document.getElementById('btnMarkClear').onclick = clearMark;
